@@ -586,13 +586,13 @@ export default function MarketingPage() {
           {/* Feature cards */}
           <div className="mt-16 grid grid-cols-1 md:grid-cols-5 gap-4">
             {[
-              { icon: "📋", title: "Campaign Planner", desc: "Strategic planning with smart defaults", color: "blue" },
-              { icon: "🎨", title: "Creative Generator", desc: "2 images + 1 video with captions", color: "green" },
-              { icon: "🌍", title: "Localizer", desc: "Multi-market translation", color: "purple" },
-              { icon: "📅", title: "Schedule Creator", desc: "2-week publishing calendar", color: "orange" },
-              { icon: "📸", title: "Publisher", desc: "Automated Instagram posting", color: "pink" },
+              { icon: "📋", title: "Campaign Planner", desc: "Strategic planning with smart defaults", borderClass: "border-blue-500" },
+              { icon: "🎨", title: "Creative Generator", desc: "2 images + 1 video with captions", borderClass: "border-green-500" },
+              { icon: "🌍", title: "Localizer", desc: "Multi-market translation", borderClass: "border-purple-500" },
+              { icon: "📅", title: "Schedule Creator", desc: "2-week publishing calendar", borderClass: "border-orange-500" },
+              { icon: "📸", title: "Publisher", desc: "Automated Instagram posting", borderClass: "border-pink-500" },
             ].map((agent) => (
-              <div key={agent.title} className={`bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 hover:shadow-xl transition-shadow border-t-4 border-${agent.color}-500`}>
+              <div key={agent.title} className={`bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 hover:shadow-xl transition-shadow border-t-4 ${agent.borderClass}`}>
                 <div className="text-3xl mb-2">{agent.icon}</div>
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
                   {agent.title}

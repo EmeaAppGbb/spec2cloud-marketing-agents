@@ -1,3 +1,7 @@
+// NOTE: This file uses Microsoft.Extensions.AI preview APIs (MEAI001) which are subject to change.
+// These APIs are required for IImageGenerator and FunctionApprovalRequestContent functionality.
+// Monitor https://github.com/microsoft/extensions for updates and breaking changes.
+// The pragma warning disable is intentional to allow use of these experimental features.
 #pragma warning disable MEAI001 // Type is for evaluation purposes only and is subject to change or removal in future updates.
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
@@ -9,6 +13,11 @@ namespace agentic_api.Workflows;
 /// <summary>
 /// Marketing workflow factory that creates an AI-powered social media campaign workflow.
 /// Orchestrates 5 specialized agents: Campaign Planner → Creative Generator → Localizer → Schedule Creator → Instagram Publisher
+/// 
+/// <para>
+/// This implementation uses preview/experimental APIs from Microsoft.Extensions.AI.
+/// These APIs may change in future versions. See MEAI001 warning for details.
+/// </para>
 /// </summary>
 public class MarketingWorkflowFactory
 {
