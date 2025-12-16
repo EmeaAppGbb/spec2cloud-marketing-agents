@@ -54,6 +54,9 @@ builder.Services.AddSingleton(_ =>
 // Register the dummy workflow factory
 builder.Services.AddSingleton<DummyWorkflowFactory>();
 
+// Register the marketing workflow factory
+builder.Services.AddSingleton<MarketingWorkflowFactory>();
+
 builder.Services.AddOpenAIResponses();
 builder.Services.AddOpenAIConversations();
 
@@ -61,6 +64,12 @@ builder.AddWorkflow("DummyWorkflow", (sp, name) =>
 {
     var factory = sp.GetRequiredService<DummyWorkflowFactory>();
     return factory.BuildWorkflow("DummyWorkflow");
+}).AddAsAIAgent();
+
+builder.AddWorkflow("MarketingWorkflow", (sp, name) =>
+{
+    var factory = sp.GetRequiredService<MarketingWorkflowFactory>();
+    return factory.BuildWorkflow("MarketingWorkflow");
 }).AddAsAIAgent();
 
 var app = builder.Build();
@@ -73,11 +82,16 @@ var dummyWorkflowFactory = app.Services.GetRequiredService<DummyWorkflowFactory>
 var dummyWorkflow = dummyWorkflowFactory.BuildWorkflow("DummyWorkflow");
 var dummyAgent = new AGUIWorkflowAgent(dummyWorkflow.AsAgent(name: "DummyWorkflow"));
 
+// Get the marketing workflow and convert it to an agent
+var marketingWorkflowFactory = app.Services.GetRequiredService<MarketingWorkflowFactory>();
+var marketingWorkflow = marketingWorkflowFactory.BuildWorkflow("MarketingWorkflow");
+var marketingAgent = new AGUIWorkflowAgent(marketingWorkflow.AsAgent(name: "MarketingWorkflow"));
+
 app.MapOpenAIResponses();
 app.MapOpenAIConversations();
 
 // Map the dummy workflow agent to the default AGUI endpoint
-app.MapAGUI("/", dummyAgent);
+app.MapAGUI("/", marketingAgent);
 
 // Map health check endpoint
 app.MapHealthChecks("/health");
