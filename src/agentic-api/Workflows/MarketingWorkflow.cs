@@ -6,6 +6,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace agentic_api.Workflows;
@@ -212,6 +213,9 @@ public class MarketingInputEvent
 public sealed class MarketingChatInputExecutor : Executor
 {
     private readonly ILogger<MarketingChatInputExecutor> _logger;
+    
+    // Static state storage keyed by conversation ID (in-memory, will be replaced with persistent storage)
+    private static readonly ConcurrentDictionary<string, MarketingCampaignState> _stateStore = new();
 
     public MarketingChatInputExecutor(ILogger<MarketingChatInputExecutor> logger) : base("MarketingChatInput")
     {
@@ -234,14 +238,13 @@ public sealed class MarketingChatInputExecutor : Executor
 
         var resultString = functionResult?.Result?.ToString() ?? string.Empty;
 
-        // Parse workflow state from function result if available
-        var state = new MarketingCampaignState();
+        // Get or initialize state from context
+        var state = GetOrCreateState(context);
 
         // Check for approval responses and route accordingly
         if (resultString.Contains("plan-approved"))
         {
             _logger.LogInformation("Campaign plan approved by user.");
-            TryParseStateFromResult(resultString, state);
             return ValueTask.FromResult(new MarketingInputEvent
             {
                 Input = lastUserMessage?.Text ?? string.Empty,
@@ -253,8 +256,6 @@ public sealed class MarketingChatInputExecutor : Executor
         if (resultString.Contains("creative-approved"))
         {
             _logger.LogInformation("Creative assets approved by user.");
-            // Try to parse state from the approval result
-            TryParseStateFromResult(resultString, state);
             return ValueTask.FromResult(new MarketingInputEvent
             {
                 Input = lastUserMessage?.Text ?? string.Empty,
@@ -266,7 +267,10 @@ public sealed class MarketingChatInputExecutor : Executor
         if (resultString.Contains("markets-selected"))
         {
             _logger.LogInformation("Markets selected by user.");
-            TryParseStateFromResult(resultString, state);
+            // Extract selected markets from result: "markets-selected|["Brazil","Spain"]"
+            var selectedMarkets = ExtractSelectedMarkets(resultString);
+            state.SelectedMarkets = selectedMarkets;
+            
             return ValueTask.FromResult(new MarketingInputEvent
             {
                 Input = lastUserMessage?.Text ?? string.Empty,
@@ -278,7 +282,6 @@ public sealed class MarketingChatInputExecutor : Executor
         if (resultString.Contains("skip-localization"))
         {
             _logger.LogInformation("User chose to skip localization.");
-            TryParseStateFromResult(resultString, state);
             state.SelectedMarkets = [];
             return ValueTask.FromResult(new MarketingInputEvent
             {
@@ -291,7 +294,6 @@ public sealed class MarketingChatInputExecutor : Executor
         if (resultString.Contains("localization-complete"))
         {
             _logger.LogInformation("Localization complete, proceeding to schedule creation.");
-            TryParseStateFromResult(resultString, state);
             return ValueTask.FromResult(new MarketingInputEvent
             {
                 Input = lastUserMessage?.Text ?? string.Empty,
@@ -303,7 +305,6 @@ public sealed class MarketingChatInputExecutor : Executor
         if (resultString.Contains("schedule-approved"))
         {
             _logger.LogInformation("Schedule approved by user.");
-            TryParseStateFromResult(resultString, state);
             return ValueTask.FromResult(new MarketingInputEvent
             {
                 Input = lastUserMessage?.Text ?? string.Empty,
@@ -315,9 +316,8 @@ public sealed class MarketingChatInputExecutor : Executor
         if (resultString.Contains("creative-rejected") || resultString.Contains("schedule-rejected"))
         {
             _logger.LogInformation("User rejected content with feedback, regenerating.");
-            TryParseStateFromResult(resultString, state);
             
-            // Extract feedback if present
+            // Extract feedback if present: "creative-rejected|feedback:Make it more colorful"
             var feedbackStart = resultString.IndexOf("feedback:", StringComparison.OrdinalIgnoreCase);
             if (feedbackStart >= 0)
             {
@@ -338,40 +338,49 @@ public sealed class MarketingChatInputExecutor : Executor
 
         // Default: Start with campaign planning
         _logger.LogInformation("Starting new campaign with planning phase.");
+        var newState = new MarketingCampaignState { CampaignBrief = lastUserMessage?.Text ?? string.Empty };
+        StoreState(context, newState);
+        
         return ValueTask.FromResult(new MarketingInputEvent
         {
             Input = lastUserMessage?.Text ?? "Create a social media campaign",
             NextStep = MarketingWorkflowSteps.CampaignPlanning,
-            State = new MarketingCampaignState { CampaignBrief = lastUserMessage?.Text ?? string.Empty }
+            State = newState
         });
     }
 
-    private static void TryParseStateFromResult(string result, MarketingCampaignState state)
+    private static MarketingCampaignState GetOrCreateState(IWorkflowContext context)
+    {
+        // Use a simple conversation ID (in production, get from context)
+        var conversationId = "default";
+        return _stateStore.GetOrAdd(conversationId, _ => new MarketingCampaignState());
+    }
+
+    private static void StoreState(IWorkflowContext context, MarketingCampaignState state)
+    {
+        // Use a simple conversation ID (in production, get from context)
+        var conversationId = "default";
+        _stateStore[conversationId] = state;
+    }
+
+    private static List<string> ExtractSelectedMarkets(string result)
     {
         try
         {
-            // Try to find and parse JSON state in the result
-            var jsonStart = result.IndexOf('{');
-            var jsonEnd = result.LastIndexOf('}');
-            if (jsonStart >= 0 && jsonEnd > jsonStart)
+            // Result format: "markets-selected|["Brazil","Spain"]"
+            var pipeIndex = result.IndexOf('|');
+            if (pipeIndex >= 0 && pipeIndex < result.Length - 1)
             {
-                var jsonPart = result[jsonStart..(jsonEnd + 1)];
-                var parsed = JsonSerializer.Deserialize<MarketingCampaignState>(jsonPart);
-                if (parsed != null)
-                {
-                    state.CampaignBrief = parsed.CampaignBrief;
-                    state.CampaignPlan = parsed.CampaignPlan;
-                    state.CreativeAssets = parsed.CreativeAssets;
-                    state.SelectedMarkets = parsed.SelectedMarkets;
-                    state.LocalizedContent = parsed.LocalizedContent;
-                    state.Schedule = parsed.Schedule;
-                }
+                var jsonPart = result[(pipeIndex + 1)..];
+                var markets = JsonSerializer.Deserialize<List<string>>(jsonPart);
+                return markets ?? [];
             }
         }
-        catch
+        catch (Exception)
         {
-            // Ignore parsing errors, use empty state
+            // If parsing fails, return empty list
         }
+        return [];
     }
 
     private ValueTask<string> HandleTurnTokenAsync(
@@ -446,8 +455,8 @@ public sealed class CampaignPlannerExecutor : Executor<MarketingInputEvent, AICo
                 functionName: "approve_campaign_plan",
                 arguments: new Dictionary<string, object?>
                 {
-                    { "plan", responseText },
-                    { "state", JsonSerializer.Serialize(input.State) }
+                    { "plan", JsonSerializer.Serialize(input.State.CampaignPlan) },
+                    { "state", "CampaignPlanning" }
                 }
             );
         }
@@ -538,15 +547,13 @@ public sealed class CreativeGeneratorExecutor : Executor<MarketingInputEvent, AI
             input.State.CreativeAssets = assets;
             _logger.LogInformation("Generated {Count} creative assets", assets.Count);
 
-            // Create assets display for approval
-            var assetsJson = JsonSerializer.Serialize(assets, new JsonSerializerOptions { WriteIndented = true });
-
+            // Pass assets directly to avoid double-serialization
             return ApprovalRequestHelper.CreateApprovalRequest(
                 functionName: "approve_creative_assets",
                 arguments: new Dictionary<string, object?>
                 {
-                    { "assets", assetsJson },
-                    { "state", JsonSerializer.Serialize(input.State) }
+                    { "assets", JsonSerializer.Serialize(assets) },
+                    { "state", "CreativeGeneration" }
                 }
             );
         }
@@ -727,8 +734,8 @@ public sealed class LocalizerExecutor : Executor<MarketingInputEvent, AIContent>
                     functionName: "select_target_markets",
                     arguments: new Dictionary<string, object?>
                     {
-                        { "availableMarkets", MarketLanguages.Keys.ToList() },
-                        { "state", JsonSerializer.Serialize(input.State) }
+                        { "availableMarkets", JsonSerializer.Serialize(MarketLanguages.Keys.ToList()) },
+                        { "state", "Localization" }
                     }
                 );
             }
@@ -757,14 +764,12 @@ public sealed class LocalizerExecutor : Executor<MarketingInputEvent, AIContent>
             _logger.LogInformation("Localization complete for {Count} markets", localizedContent.Count);
 
             // Return localized content for display (auto-proceed to schedule creation)
-            var contentJson = JsonSerializer.Serialize(localizedContent, new JsonSerializerOptions { WriteIndented = true });
-
             return ApprovalRequestHelper.CreateApprovalRequest(
                 functionName: "localization_complete",
                 arguments: new Dictionary<string, object?>
                 {
-                    { "localizedContent", contentJson },
-                    { "state", JsonSerializer.Serialize(input.State) }
+                    { "localizedContent", JsonSerializer.Serialize(localizedContent) },
+                    { "state", "Localization" }
                 }
             );
         }
@@ -879,14 +884,12 @@ public sealed class ScheduleCreatorExecutor : Executor<MarketingInputEvent, AICo
 
             _logger.LogInformation("Generated schedule with {Count} posts", schedule.Posts.Count);
 
-            var scheduleJson = JsonSerializer.Serialize(schedule, new JsonSerializerOptions { WriteIndented = true });
-
             return ApprovalRequestHelper.CreateApprovalRequest(
                 functionName: "approve_schedule",
                 arguments: new Dictionary<string, object?>
                 {
-                    { "schedule", scheduleJson },
-                    { "state", JsonSerializer.Serialize(input.State) }
+                    { "schedule", JsonSerializer.Serialize(schedule) },
+                    { "state", "ScheduleCreation" }
                 }
             );
         }
@@ -906,6 +909,17 @@ public sealed class ScheduleCreatorExecutor : Executor<MarketingInputEvent, AICo
         var platforms = new[] { "Instagram", "TikTok" };
         var assetCount = state.CreativeAssets.Count;
         var markets = state.SelectedMarkets.Count > 0 ? state.SelectedMarkets : new List<string> { "English" };
+
+        // Guard against empty creative assets
+        if (assetCount == 0)
+        {
+            return new PublishingSchedule
+            {
+                StartDate = startDate,
+                EndDate = endDate,
+                Posts = []
+            };
+        }
 
         var postIndex = 0;
         for (int day = 0; day < 14; day++)
@@ -1009,15 +1023,13 @@ public sealed class InstagramPublisherExecutor : Executor<MarketingInputEvent, A
                 status = result.Success ? "Campaign completed successfully!" : "Campaign completed with publishing error"
             };
 
-            var summaryJson = JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true });
-
             return ApprovalRequestHelper.CreateApprovalRequest(
                 functionName: "campaign_complete",
                 arguments: new Dictionary<string, object?>
                 {
-                    { "summary", summaryJson },
+                    { "summary", JsonSerializer.Serialize(summary) },
                     { "postUrl", result.PostUrl },
-                    { "success", result.Success }
+                    { "success", result.Success.ToString() }
                 }
             );
         }

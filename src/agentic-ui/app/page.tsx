@@ -24,11 +24,22 @@ function AgentBadge({ agentName }: { agentName: string }) {
 
 // JSON display component for structured data
 function JsonDisplay({ data, title }: { data: string; title?: string }) {
+  console.log("JsonDisplay - data:", data, "title:", title);
+  
   let parsed: unknown;
   try {
     parsed = JSON.parse(data);
-  } catch {
-    return <pre className="text-sm whitespace-pre-wrap break-words">{data}</pre>;
+    console.log("JsonDisplay - parsed:", parsed);
+  } catch (error) {
+    console.error("JsonDisplay - parse error:", error);
+    return (
+      <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+        {title && <h4 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">{title}</h4>}
+        <pre className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">
+          {data || "(empty)"}
+        </pre>
+      </div>
+    );
   }
 
   return (
@@ -41,8 +52,125 @@ function JsonDisplay({ data, title }: { data: string; title?: string }) {
   );
 }
 
+// Campaign Strategy display component with proper UI
+function CampaignStrategyDisplay({ data }: { data: string }) {
+  let strategy: {
+    Objectives?: string;
+    TargetAudience?: string;
+    Platforms?: string[];
+    Timeline?: string;
+    Budget?: string | null;
+    ToneStyle?: string;
+    KeyMessages?: string[];
+  };
+  
+  // Debug: Log the incoming data
+  console.log("CampaignStrategyDisplay - raw data:", data);
+  
+  try {
+    strategy = JSON.parse(data);
+    console.log("CampaignStrategyDisplay - parsed strategy:", strategy);
+  } catch (error) {
+    console.error("CampaignStrategyDisplay - parse error:", error);
+    return <JsonDisplay data={data} title="Campaign Strategy (Parse Error)" />;
+  }
+
+  // Check if we have any data to display (using PascalCase to match backend serialization)
+  const hasAnyData = strategy.Objectives || strategy.TargetAudience || 
+                     (strategy.Platforms && strategy.Platforms.length > 0) || 
+                     strategy.Timeline || strategy.ToneStyle || 
+                     (strategy.KeyMessages && strategy.KeyMessages.length > 0);
+
+  if (!hasAnyData) {
+    return (
+      <div className="bg-yellow-100 dark:bg-yellow-900/20 p-4 rounded">
+        <p className="text-yellow-800 dark:text-yellow-200 mb-2">No campaign data to display</p>
+        <JsonDisplay data={data} title="Raw Data" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Objectives */}
+      {strategy.Objectives && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-blue-500">
+          <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
+            <span className="text-blue-500">🎯</span> Objectives
+          </h4>
+          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.Objectives}</p>
+        </div>
+      )}
+
+      {/* Target Audience */}
+      {strategy.TargetAudience && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-purple-500">
+          <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
+            <span className="text-purple-500">👥</span> Target Audience
+          </h4>
+          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.TargetAudience}</p>
+        </div>
+      )}
+
+      {/* Platforms & Timeline */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {strategy.Platforms && strategy.Platforms.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-pink-500">
+            <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
+              <span className="text-pink-500">📱</span> Platforms
+            </h4>
+            <div className="flex flex-wrap gap-2">
+              {strategy.Platforms.map((platform, i) => (
+                <span key={i} className="px-3 py-1 bg-pink-100 dark:bg-pink-900 text-pink-800 dark:text-pink-200 rounded-full text-sm font-medium">
+                  {platform}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {strategy.Timeline && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-orange-500">
+            <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
+              <span className="text-orange-500">⏱️</span> Timeline
+            </h4>
+            <p className="text-gray-700 dark:text-gray-300 text-sm font-medium">{strategy.Timeline}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Tone & Style */}
+      {strategy.ToneStyle && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-green-500">
+          <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
+            <span className="text-green-500">🎨</span> Tone & Style
+          </h4>
+          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.ToneStyle}</p>
+        </div>
+      )}
+
+      {/* Key Messages */}
+      {strategy.KeyMessages && strategy.KeyMessages.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-yellow-500">
+          <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
+            <span className="text-yellow-500">💬</span> Key Messages
+          </h4>
+          <ul className="space-y-2">
+            {strategy.KeyMessages.map((message, i) => (
+              <li key={i} className="flex gap-2 text-gray-700 dark:text-gray-300 text-sm">
+                <span className="text-yellow-500 font-bold mt-0.5">•</span>
+                <span className="leading-relaxed">{message}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Creative asset display component
-function CreativeAssetDisplay({ asset }: { asset: { type: string; url: string; caption: string; hashtags: string[] } }) {
+function CreativeAssetDisplay({ asset }: { asset: { type: string; url: string; caption?: string; hashtags?: string[] } }) {
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-4">
       <div className="flex items-center gap-2 mb-2">
@@ -64,18 +192,22 @@ function CreativeAssetDisplay({ asset }: { asset: { type: string; url: string; c
           <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">{asset.url}</p>
         </div>
       )}
-      <p className="text-gray-800 dark:text-gray-200 mb-2">{asset.caption}</p>
-      <div className="flex flex-wrap gap-1">
-        {asset.hashtags.map((tag, i) => (
-          <span key={i} className="text-blue-600 dark:text-blue-400 text-sm">{tag}</span>
-        ))}
-      </div>
+      {asset.caption && <p className="text-gray-800 dark:text-gray-200 mb-2">{asset.caption}</p>}
+      {asset.hashtags && asset.hashtags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {asset.hashtags.map((tag, i) => (
+            <span key={i} className="text-blue-600 dark:text-blue-400 text-sm">{tag}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // Schedule table component
-function ScheduleTable({ schedule }: { schedule: { posts: Array<{ scheduledTime: string; platform: string; contentType: string; language: string; market: string }> } }) {
+function ScheduleTable({ schedule }: { schedule: { posts?: Array<{ scheduledTime: string; platform: string; contentType: string; language: string; market: string }> } }) {
+  const posts = schedule.posts || [];
+  
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -88,7 +220,7 @@ function ScheduleTable({ schedule }: { schedule: { posts: Array<{ scheduledTime:
           </tr>
         </thead>
         <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-          {schedule.posts.slice(0, 14).map((post, i) => (
+          {posts.slice(0, 14).map((post, i) => (
             <tr key={i}>
               <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
                 {new Date(post.scheduledTime).toLocaleString()}
@@ -108,9 +240,9 @@ function ScheduleTable({ schedule }: { schedule: { posts: Array<{ scheduledTime:
           ))}
         </tbody>
       </table>
-      {schedule.posts.length > 14 && (
+      {posts.length > 14 && (
         <p className="text-center text-gray-500 dark:text-gray-400 mt-2 text-sm">
-          + {schedule.posts.length - 14} more posts
+          + {posts.length - 14} more posts
         </p>
       )}
     </div>
@@ -171,9 +303,9 @@ function MarketSelector({
 
 export default function Page() {
   const [campaignState, setCampaignState] = useState<{
-    plan?: unknown;
-    assets?: Array<{ type: string; url: string; caption: string; hashtags: string[] }>;
-    localizedContent?: Record<string, unknown>;
+    plan?: Record<string, any>;
+    assets?: Array<{ type: string; url: string; caption?: string; hashtags?: string[] }>;
+    localizedContent?: Record<string, any>;
     schedule?: { posts: Array<{ scheduledTime: string; platform: string; contentType: string; language: string; market: string }> };
     publishedPost?: { postUrl?: string; success?: boolean };
   }>({});
@@ -189,6 +321,10 @@ export default function Page() {
     render: ({ args, respond }) => {
       if (!respond) return <></>;
       
+      // Debug: Log what we're receiving
+      console.log("Campaign Plan Approval - args:", args);
+      console.log("Campaign Plan Approval - args.plan:", args.plan);
+      
       return (
         <div className="p-4 mb-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg shadow-md">
           <div className="flex items-center gap-2 mb-3">
@@ -198,10 +334,26 @@ export default function Page() {
           <p className="text-sm text-blue-800 dark:text-blue-200 mb-3">
             Review the strategic campaign plan below. Approve to proceed with creative asset generation.
           </p>
-          <JsonDisplay data={args.plan} title="Campaign Strategy" />
+          {args.plan ? (
+            <CampaignStrategyDisplay data={args.plan} />
+          ) : (
+            <div className="bg-yellow-100 dark:bg-yellow-900/20 p-4 rounded">
+              <p className="text-yellow-800 dark:text-yellow-200">No plan data received. Debug info:</p>
+              <pre className="text-xs mt-2">{JSON.stringify(args, null, 2)}</pre>
+            </div>
+          )}
           <div className="flex gap-3 mt-4">
             <button 
-              onClick={() => respond("plan-approved")}
+              onClick={() => {
+                try {
+                  const planData = JSON.parse(args.plan);
+                  setCampaignState(prev => ({ ...prev, plan: planData }));
+                } catch {
+                  // If parsing fails, store an empty object
+                  setCampaignState(prev => ({ ...prev, plan: {} }));
+                }
+                respond("plan-approved");
+              }}
               className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition-colors shadow-md"
             >
               ✓ Approve Plan
@@ -223,10 +375,24 @@ export default function Page() {
     render: ({ args, respond }) => {
       if (!respond) return <></>;
 
-      let assets: Array<{ type: string; url: string; caption: string; hashtags: string[] }> = [];
+      // Debug: Log what we're receiving
+      console.log("Creative Assets Approval - args:", args);
+      console.log("Creative Assets Approval - args.assets:", args.assets);
+
+      let assets: Array<{ type: string; url: string; caption?: string; hashtags?: string[] }> = [];
       try {
-        assets = JSON.parse(args.assets);
-      } catch {
+        const parsed = JSON.parse(args.assets);
+        // Ensure parsed is an array and has valid structure
+        if (Array.isArray(parsed)) {
+          assets = parsed.map(asset => ({
+            type: asset.Type || asset.type || "unknown",
+            url: asset.Url || asset.url || "",
+            caption: asset.Caption || asset.caption,
+            hashtags: asset.Hashtags || asset.hashtags || []
+          }));
+        }
+      } catch (error) {
+        console.error("Failed to parse assets:", error);
         assets = [];
       }
 
@@ -239,11 +405,18 @@ export default function Page() {
           <p className="text-sm text-green-800 dark:text-green-200 mb-3">
             Review the {assets.length} creative assets (2 images + 1 video) below. Approve all or provide feedback for regeneration.
           </p>
-          <div className="max-h-96 overflow-y-auto mb-4">
-            {assets.map((asset, i) => (
-              <CreativeAssetDisplay key={i} asset={asset} />
-            ))}
-          </div>
+          {assets.length > 0 ? (
+            <div className="max-h-96 overflow-y-auto mb-4">
+              {assets.map((asset, i) => (
+                <CreativeAssetDisplay key={i} asset={asset} />
+              ))}
+            </div>
+          ) : (
+            <div className="bg-yellow-100 dark:bg-yellow-900/20 p-4 rounded mb-4">
+              <p className="text-yellow-800 dark:text-yellow-200">No assets data received. Debug info:</p>
+              <pre className="text-xs mt-2">{JSON.stringify(args, null, 2)}</pre>
+            </div>
+          )}
           <div className="flex gap-3">
             <button 
               onClick={() => {
@@ -365,7 +538,18 @@ export default function Page() {
 
       let schedule: { posts: Array<{ scheduledTime: string; platform: string; contentType: string; language: string; market: string }> } | null = null;
       try {
-        schedule = JSON.parse(args.schedule);
+        const parsed = JSON.parse(args.schedule);
+        // Handle both PascalCase (from backend) and camelCase
+        const posts = parsed.Posts || parsed.posts || [];
+        schedule = {
+          posts: posts.map((post: any) => ({
+            scheduledTime: post.ScheduledTime || post.scheduledTime,
+            platform: post.Platform || post.platform,
+            contentType: post.ContentType || post.contentType,
+            language: post.Language || post.language,
+            market: post.Market || post.market
+          }))
+        };
       } catch {
         schedule = null;
       }
@@ -379,7 +563,13 @@ export default function Page() {
           <p className="text-sm text-orange-800 dark:text-orange-200 mb-3">
             Review the 2-week publishing schedule below. {schedule?.posts?.length || 0} posts scheduled.
           </p>
-          {schedule && <ScheduleTable schedule={schedule} />}
+          {schedule && schedule.posts && schedule.posts.length > 0 ? (
+            <ScheduleTable schedule={schedule} />
+          ) : (
+            <div className="bg-yellow-100 dark:bg-yellow-900/20 p-4 rounded">
+              <p className="text-yellow-800 dark:text-yellow-200">No schedule data received.</p>
+            </div>
+          )}
           <div className="flex gap-3 mt-4">
             <button 
               onClick={() => {
@@ -485,7 +675,7 @@ export default function Page() {
       <main className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 dark:from-gray-900 dark:to-purple-900">
         <div className="container mx-auto px-4 py-12 max-w-5xl">
           {/* Campaign Status Dashboard */}
-          {(campaignState.assets || campaignState.schedule || campaignState.publishedPost) && (
+          {(campaignState.plan || campaignState.assets || campaignState.schedule || campaignState.publishedPost) && (
             <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 border-2 border-purple-200 dark:border-purple-700">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">📊 Campaign Dashboard</h2>
               
@@ -493,11 +683,12 @@ export default function Page() {
               <div className="flex items-center justify-between mb-6 overflow-x-auto pb-2">
                 {["Planning", "Creative", "Localization", "Schedule", "Published"].map((step, i) => {
                   const stepStatus = 
-                    i === 0 ? "complete" :
-                    i === 1 && campaignState.assets ? "complete" :
-                    i === 2 && campaignState.localizedContent ? "complete" :
-                    i === 3 && campaignState.schedule ? "complete" :
-                    i === 4 && campaignState.publishedPost ? "complete" : "pending";
+                    (i === 0 && Boolean(campaignState.plan)) ? "complete" :
+                    (i === 1 && Boolean(campaignState.assets)) ? "complete" :
+                    (i === 2 && Boolean(campaignState.localizedContent)) ? "complete" :
+                    (i === 3 && Boolean(campaignState.schedule)) ? "complete" :
+                    (i === 4 && Boolean(campaignState.publishedPost)) ? "complete" : "pending";
+                  const isLast = i === 4;
                   
                   return (
                     <div key={step} className="flex items-center">
@@ -513,16 +704,28 @@ export default function Page() {
                           ? "text-green-600 dark:text-green-400 font-medium" 
                           : "text-gray-500 dark:text-gray-400"
                       }`}>{step}</span>
-                      {i < 4 && <div className="w-8 h-0.5 bg-gray-300 dark:bg-gray-600 mx-2"></div>}
+                      {!isLast && <div className="w-8 h-0.5 bg-gray-300 dark:bg-gray-600 mx-2"></div>}
                     </div>
                   );
                 })}
               </div>
 
+              {/* Approved plan display */}
+              {campaignState.plan && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
+                    <span className="text-blue-500">✅</span> Approved Campaign Strategy
+                  </h3>
+                  <CampaignStrategyDisplay data={JSON.stringify(campaignState.plan)} />
+                </div>
+              )}
+
               {/* Approved assets display */}
               {campaignState.assets && campaignState.assets.length > 0 && (
                 <div className="mb-6">
-                  <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3">✅ Approved Assets</h3>
+                  <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
+                    <span className="text-green-500">✅</span> Approved Creative Assets
+                  </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {campaignState.assets.map((asset, i) => (
                       <div key={i} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
@@ -537,6 +740,39 @@ export default function Page() {
                         <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 truncate">{asset.caption}</p>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Localized content display */}
+              {campaignState.localizedContent && Object.keys(campaignState.localizedContent).length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
+                    <span className="text-purple-500">✅</span> Localized Content ({Object.keys(campaignState.localizedContent).length} Markets)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {Object.entries(campaignState.localizedContent).map(([market, content]: [string, any]) => (
+                      <div key={market} className="border border-purple-200 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
+                        <h4 className="font-semibold text-purple-900 dark:text-purple-200 mb-1">{market}</h4>
+                        <p className="text-xs text-purple-700 dark:text-purple-300">
+                          {content.Language || content.language} • {content.Assets?.length || content.assets?.length || 0} localized assets
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Approved schedule display */}
+              {campaignState.schedule && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
+                    <span className="text-orange-500">✅</span> Approved Publishing Schedule
+                  </h3>
+                  <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700 rounded-lg p-3">
+                    <p className="text-sm text-orange-800 dark:text-orange-200">
+                      {campaignState.schedule.posts.length} posts scheduled over 2 weeks
+                    </p>
                   </div>
                 </div>
               )}

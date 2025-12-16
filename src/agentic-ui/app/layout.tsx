@@ -11,7 +11,7 @@ export default function RootLayout({ children }: {children: React.ReactNode}) {
         <title>Marketing Campaign Studio</title>
       </head>
       <body>
-        <CopilotKit runtimeUrl="/api/copilotkit/marketing" agent="marketing_agent">
+        <CopilotKit runtimeUrl="/api/copilotkit" agent="my_agent">
           {children}
         </CopilotKit>
       </body>

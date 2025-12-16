@@ -91,10 +91,7 @@ app.MapOpenAIResponses();
 app.MapOpenAIConversations();
 
 // Map the dummy workflow agent to the default AGUI endpoint
-app.MapAGUI("/", dummyAgent);
-
-// Map the marketing workflow agent to a dedicated endpoint
-app.MapAGUI("/marketing", marketingAgent);
+app.MapAGUI("/", marketingAgent);
 
 // Map health check endpoint
 app.MapHealthChecks("/health");
