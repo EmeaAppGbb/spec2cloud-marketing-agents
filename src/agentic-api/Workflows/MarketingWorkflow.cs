@@ -238,6 +238,18 @@ public sealed class MarketingChatInputExecutor : Executor
         var state = new MarketingCampaignState();
 
         // Check for approval responses and route accordingly
+        if (resultString.Contains("plan-approved"))
+        {
+            _logger.LogInformation("Campaign plan approved by user.");
+            TryParseStateFromResult(resultString, state);
+            return ValueTask.FromResult(new MarketingInputEvent
+            {
+                Input = lastUserMessage?.Text ?? string.Empty,
+                NextStep = MarketingWorkflowSteps.CreativeGeneration,
+                State = state
+            });
+        }
+
         if (resultString.Contains("creative-approved"))
         {
             _logger.LogInformation("Creative assets approved by user.");
