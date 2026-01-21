@@ -28,6 +28,7 @@ public class MarketingWorkflowFactory
     private readonly ILogger<LocalizerExecutor> _localizerLogger;
     private readonly ILogger<ScheduleCreatorExecutor> _scheduleLogger;
     private readonly ILogger<InstagramPublisherExecutor> _publisherLogger;
+    private readonly ILogger<CampaignCompletedExecutor> _completedLogger;
     private readonly IChatClient _chatClient;
     private readonly IImageGenerator _imageGenerator;
 
@@ -38,6 +39,7 @@ public class MarketingWorkflowFactory
         ILogger<LocalizerExecutor> localizerLogger,
         ILogger<ScheduleCreatorExecutor> scheduleLogger,
         ILogger<InstagramPublisherExecutor> publisherLogger,
+        ILogger<CampaignCompletedExecutor> completedLogger,
         IChatClient chatClient,
         IImageGenerator imageGenerator)
     {
@@ -47,6 +49,7 @@ public class MarketingWorkflowFactory
         _localizerLogger = localizerLogger;
         _scheduleLogger = scheduleLogger;
         _publisherLogger = publisherLogger;
+        _completedLogger = completedLogger;
         _chatClient = chatClient;
         _imageGenerator = imageGenerator;
     }
@@ -60,6 +63,7 @@ public class MarketingWorkflowFactory
         var localizer = new LocalizerExecutor(_localizerLogger, _chatClient);
         var scheduleCreator = new ScheduleCreatorExecutor(_scheduleLogger, _chatClient);
         var instagramPublisher = new InstagramPublisherExecutor(_publisherLogger);
+        var campaignCompleted = new CampaignCompletedExecutor(_completedLogger);
 
         // Build workflow with conditional routing based on workflow state
         var workflowBuilder = new WorkflowBuilder(chatInput)
@@ -71,13 +75,15 @@ public class MarketingWorkflowFactory
                     .AddCase(IsStep(MarketingWorkflowSteps.Localization), localizer)
                     .AddCase(IsStep(MarketingWorkflowSteps.ScheduleCreation), scheduleCreator)
                     .AddCase(IsStep(MarketingWorkflowSteps.InstagramPublishing), instagramPublisher)
+                    .AddCase(IsStep(MarketingWorkflowSteps.Completed), campaignCompleted)
                     .WithDefault(campaignPlanner)
             )
             .WithOutputFrom(campaignPlanner)
             .WithOutputFrom(creativeGenerator)
             .WithOutputFrom(localizer)
             .WithOutputFrom(scheduleCreator)
-            .WithOutputFrom(instagramPublisher);
+            .WithOutputFrom(instagramPublisher)
+            .WithOutputFrom(campaignCompleted);
 
         return workflowBuilder.Build();
     }
@@ -332,6 +338,18 @@ public sealed class MarketingChatInputExecutor : Executor
             {
                 Input = lastUserMessage?.Text ?? string.Empty,
                 NextStep = nextStep,
+                State = state
+            });
+        }
+
+        // Campaign completed - user acknowledged the final result
+        if (resultString.Contains("acknowledged"))
+        {
+            _logger.LogInformation("Campaign completed and acknowledged by user.");
+            return ValueTask.FromResult(new MarketingInputEvent
+            {
+                Input = lastUserMessage?.Text ?? string.Empty,
+                NextStep = MarketingWorkflowSteps.Completed,
                 State = state
             });
         }
@@ -1038,5 +1056,33 @@ public sealed class InstagramPublisherExecutor : Executor<MarketingInputEvent, A
             _logger.LogError(ex, "Error in instagram publisher executor");
             return new TextContent("Sorry, I encountered an error while publishing to Instagram. Please try again.");
         }
+    }
+}
+
+/// <summary>
+/// Campaign Completed executor that handles the final state after user acknowledges campaign completion.
+/// This executor terminates the workflow gracefully without restarting.
+/// </summary>
+public sealed class CampaignCompletedExecutor : Executor<MarketingInputEvent, AIContent>
+{
+    private readonly ILogger<CampaignCompletedExecutor> _logger;
+
+    public CampaignCompletedExecutor(ILogger<CampaignCompletedExecutor> logger) : base("CampaignCompleted")
+    {
+        _logger = logger;
+    }
+
+    public override ValueTask<AIContent> HandleAsync(
+        MarketingInputEvent input,
+        IWorkflowContext context,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Campaign workflow completed successfully.");
+        
+        // Return a simple text message indicating the workflow is complete
+        // This prevents the workflow from looping back to the beginning
+        return ValueTask.FromResult<AIContent>(
+            new TextContent("Your marketing campaign has been completed successfully! Feel free to start a new campaign whenever you're ready.")
+        );
     }
 }
