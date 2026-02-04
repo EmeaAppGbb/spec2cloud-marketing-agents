@@ -110,13 +110,18 @@ module imageModelDeploy 'modules/image-model.bicep' = {
 }
 
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = resources.outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT
+output AZURE_CONTAINER_APPS_ENVIRONMENT_DEFAULT_DOMAIN string = resources.outputs.AZURE_CONTAINER_APPS_ENVIRONMENT_DEFAULT_DOMAIN
+output AZURE_CONTAINER_APP_AGENTIC_API_FQDN string = resources.outputs.AZURE_CONTAINER_APP_AGENTIC_API_FQDN
 output AZURE_RESOURCE_AGENTIC_API_ID string = resources.outputs.AZURE_RESOURCE_AGENTIC_API_ID
 output AZURE_RESOURCE_AGENTIC_UI_ID string = resources.outputs.AZURE_RESOURCE_AGENTIC_UI_ID
-output AZURE_RESOURCE_AGENTIC_STORAGE_ID string = resources.outputs.AZURE_RESOURCE_AGENTIC_STORAGE_ID
+output AZURE_RESOURCE_COSMOS_ID string = resources.outputs.AZURE_RESOURCE_COSMOS_ID
+output AZURE_COSMOS_ENDPOINT string = resources.outputs.AZURE_COSMOS_ENDPOINT
 output AZURE_AI_PROJECT_ENDPOINT string = aiModelsDeploy.outputs.ENDPOINT
 output AZURE_RESOURCE_AI_PROJECT_ID string = aiModelsDeploy.outputs.projectId
 output AZURE_AI_SEARCH_ENDPOINT string = resources.outputs.AZURE_AI_SEARCH_ENDPOINT
 output AZURE_RESOURCE_SEARCH_ID string = resources.outputs.AZURE_RESOURCE_SEARCH_ID
+output AZURE_STORAGE_ENDPOINT string = resources.outputs.AZURE_STORAGE_ENDPOINT
+output AZURE_RESOURCE_STORAGE_ID string = resources.outputs.AZURE_RESOURCE_STORAGE_ID
 output AZURE_OPENAI_ENDPOINT string = aiModelsDeploy.outputs.OPENAI_ENDPOINT
 output AZURE_OPENAI_DEPLOYMENT_NAME string = deploymentName
 output AZURE_IMAGE_MODEL_DEPLOYMENT_NAME string = imageModelDeploy.outputs.deploymentName

@@ -8,6 +8,9 @@ using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using agentic_api.Services;
+using agentic_api.Models;
+using Microsoft.AspNetCore.Http;
 
 namespace agentic_api.Workflows;
 
@@ -31,6 +34,8 @@ public class MarketingWorkflowFactory
     private readonly ILogger<CampaignCompletedExecutor> _completedLogger;
     private readonly IChatClient _chatClient;
     private readonly IImageGenerator _imageGenerator;
+    private readonly ICampaignPersistenceService _persistenceService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
     public MarketingWorkflowFactory(
         ILogger<MarketingChatInputExecutor> inputLogger,
@@ -41,7 +46,9 @@ public class MarketingWorkflowFactory
         ILogger<InstagramPublisherExecutor> publisherLogger,
         ILogger<CampaignCompletedExecutor> completedLogger,
         IChatClient chatClient,
-        IImageGenerator imageGenerator)
+        IImageGenerator imageGenerator,
+        ICampaignPersistenceService persistenceService,
+        IHttpContextAccessor httpContextAccessor)
     {
         _inputLogger = inputLogger;
         _plannerLogger = plannerLogger;
@@ -52,18 +59,20 @@ public class MarketingWorkflowFactory
         _completedLogger = completedLogger;
         _chatClient = chatClient;
         _imageGenerator = imageGenerator;
+        _persistenceService = persistenceService;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     public Workflow BuildWorkflow(string name)
     {
         // Create executors
-        var chatInput = new MarketingChatInputExecutor(_inputLogger);
-        var campaignPlanner = new CampaignPlannerExecutor(_plannerLogger, _chatClient);
-        var creativeGenerator = new CreativeGeneratorExecutor(_creativeLogger, _chatClient, _imageGenerator);
-        var localizer = new LocalizerExecutor(_localizerLogger, _chatClient);
-        var scheduleCreator = new ScheduleCreatorExecutor(_scheduleLogger, _chatClient);
-        var instagramPublisher = new InstagramPublisherExecutor(_publisherLogger);
-        var campaignCompleted = new CampaignCompletedExecutor(_completedLogger);
+        var chatInput = new MarketingChatInputExecutor(_inputLogger, _persistenceService, _httpContextAccessor);
+        var campaignPlanner = new CampaignPlannerExecutor(_plannerLogger, _chatClient, _persistenceService);
+        var creativeGenerator = new CreativeGeneratorExecutor(_creativeLogger, _chatClient, _imageGenerator, _persistenceService);
+        var localizer = new LocalizerExecutor(_localizerLogger, _chatClient, _persistenceService);
+        var scheduleCreator = new ScheduleCreatorExecutor(_scheduleLogger, _chatClient, _persistenceService);
+        var instagramPublisher = new InstagramPublisherExecutor(_publisherLogger, _persistenceService);
+        var campaignCompleted = new CampaignCompletedExecutor(_completedLogger, _persistenceService);
 
         // Build workflow with conditional routing based on workflow state
         var workflowBuilder = new WorkflowBuilder(chatInput)
@@ -211,6 +220,16 @@ public class MarketingInputEvent
     public required string Input { get; set; }
     public MarketingWorkflowSteps NextStep { get; set; }
     public MarketingCampaignState State { get; set; } = new();
+    
+    /// <summary>
+    /// Campaign ID for persistence tracking
+    /// </summary>
+    public string? CampaignId { get; set; }
+    
+    /// <summary>
+    /// Session ID for user identification
+    /// </summary>
+    public string? SessionId { get; set; }
 }
 
 /// <summary>
@@ -219,13 +238,20 @@ public class MarketingInputEvent
 public sealed class MarketingChatInputExecutor : Executor
 {
     private readonly ILogger<MarketingChatInputExecutor> _logger;
+    private readonly ICampaignPersistenceService _persistenceService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     
-    // Static state storage keyed by conversation ID (in-memory, will be replaced with persistent storage)
-    private static readonly ConcurrentDictionary<string, MarketingCampaignState> _stateStore = new();
+    // Static state storage keyed by session ID (fallback for in-memory state)
+    private static readonly ConcurrentDictionary<string, (string CampaignId, MarketingCampaignState State)> _stateStore = new();
 
-    public MarketingChatInputExecutor(ILogger<MarketingChatInputExecutor> logger) : base("MarketingChatInput")
+    public MarketingChatInputExecutor(
+        ILogger<MarketingChatInputExecutor> logger,
+        ICampaignPersistenceService persistenceService,
+        IHttpContextAccessor httpContextAccessor) : base("MarketingChatInput")
     {
         _logger = logger;
+        _persistenceService = persistenceService;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     protected override Microsoft.Agents.AI.Workflows.RouteBuilder ConfigureRoutes(Microsoft.Agents.AI.Workflows.RouteBuilder routeBuilder) =>
@@ -244,86 +270,67 @@ public sealed class MarketingChatInputExecutor : Executor
 
         var resultString = functionResult?.Result?.ToString() ?? string.Empty;
 
+        // Extract session ID from HTTP header or use default
+        var sessionId = ExtractSessionIdFromHeader() ?? "default-session";
+        _logger.LogInformation("Using session ID: {SessionId}", sessionId);
+        
         // Get or initialize state from context
-        var state = GetOrCreateState(context);
+        var (campaignId, state) = GetOrCreateState(sessionId);
+
+        // Helper to create event with tracking info
+        MarketingInputEvent CreateEvent(MarketingWorkflowSteps step, MarketingCampaignState s) => new()
+        {
+            Input = lastUserMessage?.Text ?? string.Empty,
+            NextStep = step,
+            State = s,
+            CampaignId = campaignId,
+            SessionId = sessionId
+        };
 
         // Check for approval responses and route accordingly
         if (resultString.Contains("plan-approved"))
         {
-            _logger.LogInformation("Campaign plan approved by user.");
-            return ValueTask.FromResult(new MarketingInputEvent
-            {
-                Input = lastUserMessage?.Text ?? string.Empty,
-                NextStep = MarketingWorkflowSteps.CreativeGeneration,
-                State = state
-            });
+            _logger.LogInformation("Campaign plan approved by user. Routing to CreativeGeneration with CampaignId: {CampaignId}", campaignId);
+            return ValueTask.FromResult(CreateEvent(MarketingWorkflowSteps.CreativeGeneration, state));
         }
 
         if (resultString.Contains("creative-approved"))
         {
             _logger.LogInformation("Creative assets approved by user.");
-            return ValueTask.FromResult(new MarketingInputEvent
-            {
-                Input = lastUserMessage?.Text ?? string.Empty,
-                NextStep = MarketingWorkflowSteps.Localization,
-                State = state
-            });
+            return ValueTask.FromResult(CreateEvent(MarketingWorkflowSteps.Localization, state));
         }
 
         if (resultString.Contains("markets-selected"))
         {
             _logger.LogInformation("Markets selected by user.");
-            // Extract selected markets from result: "markets-selected|["Brazil","Spain"]"
             var selectedMarkets = ExtractSelectedMarkets(resultString);
             state.SelectedMarkets = selectedMarkets;
-            
-            return ValueTask.FromResult(new MarketingInputEvent
-            {
-                Input = lastUserMessage?.Text ?? string.Empty,
-                NextStep = MarketingWorkflowSteps.Localization,
-                State = state
-            });
+            return ValueTask.FromResult(CreateEvent(MarketingWorkflowSteps.Localization, state));
         }
 
         if (resultString.Contains("skip-localization"))
         {
             _logger.LogInformation("User chose to skip localization.");
             state.SelectedMarkets = [];
-            return ValueTask.FromResult(new MarketingInputEvent
-            {
-                Input = lastUserMessage?.Text ?? string.Empty,
-                NextStep = MarketingWorkflowSteps.ScheduleCreation,
-                State = state
-            });
+            return ValueTask.FromResult(CreateEvent(MarketingWorkflowSteps.ScheduleCreation, state));
         }
 
         if (resultString.Contains("localization-complete"))
         {
             _logger.LogInformation("Localization complete, proceeding to schedule creation.");
-            return ValueTask.FromResult(new MarketingInputEvent
-            {
-                Input = lastUserMessage?.Text ?? string.Empty,
-                NextStep = MarketingWorkflowSteps.ScheduleCreation,
-                State = state
-            });
+            return ValueTask.FromResult(CreateEvent(MarketingWorkflowSteps.ScheduleCreation, state));
         }
 
         if (resultString.Contains("schedule-approved"))
         {
             _logger.LogInformation("Schedule approved by user.");
-            return ValueTask.FromResult(new MarketingInputEvent
-            {
-                Input = lastUserMessage?.Text ?? string.Empty,
-                NextStep = MarketingWorkflowSteps.InstagramPublishing,
-                State = state
-            });
+            return ValueTask.FromResult(CreateEvent(MarketingWorkflowSteps.InstagramPublishing, state));
         }
 
         if (resultString.Contains("creative-rejected") || resultString.Contains("schedule-rejected"))
         {
             _logger.LogInformation("User rejected content with feedback, regenerating.");
             
-            // Extract feedback if present: "creative-rejected|feedback:Make it more colorful"
             var feedbackStart = resultString.IndexOf("feedback:", StringComparison.OrdinalIgnoreCase);
             if (feedbackStart >= 0)
             {
@@ -334,51 +341,57 @@ public sealed class MarketingChatInputExecutor : Executor
                 ? MarketingWorkflowSteps.CreativeGeneration
                 : MarketingWorkflowSteps.ScheduleCreation;
 
-            return ValueTask.FromResult(new MarketingInputEvent
-            {
-                Input = lastUserMessage?.Text ?? string.Empty,
-                NextStep = nextStep,
-                State = state
-            });
+            return ValueTask.FromResult(CreateEvent(nextStep, state));
         }
 
-        // Campaign completed - user acknowledged the final result
         if (resultString.Contains("acknowledged"))
         {
             _logger.LogInformation("Campaign completed and acknowledged by user.");
-            return ValueTask.FromResult(new MarketingInputEvent
-            {
-                Input = lastUserMessage?.Text ?? string.Empty,
-                NextStep = MarketingWorkflowSteps.Completed,
-                State = state
-            });
+            return ValueTask.FromResult(CreateEvent(MarketingWorkflowSteps.Completed, state));
         }
 
         // Default: Start with campaign planning
         _logger.LogInformation("Starting new campaign with planning phase.");
+        var newCampaignId = Guid.NewGuid().ToString();
         var newState = new MarketingCampaignState { CampaignBrief = lastUserMessage?.Text ?? string.Empty };
-        StoreState(context, newState);
+        StoreState(sessionId, newCampaignId, newState);
         
         return ValueTask.FromResult(new MarketingInputEvent
         {
             Input = lastUserMessage?.Text ?? "Create a social media campaign",
             NextStep = MarketingWorkflowSteps.CampaignPlanning,
-            State = newState
+            State = newState,
+            CampaignId = newCampaignId,
+            SessionId = sessionId
         });
     }
 
-    private static MarketingCampaignState GetOrCreateState(IWorkflowContext context)
+    private string? ExtractSessionIdFromHeader()
     {
-        // Use a simple conversation ID (in production, get from context)
-        var conversationId = "default";
-        return _stateStore.GetOrAdd(conversationId, _ => new MarketingCampaignState());
+        // Extract session ID from the x-session-id HTTP header
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext?.Request.Headers.TryGetValue("x-session-id", out var sessionId) == true)
+        {
+            return sessionId.ToString();
+        }
+        return null;
     }
 
-    private static void StoreState(IWorkflowContext context, MarketingCampaignState state)
+    private static (string CampaignId, MarketingCampaignState State) GetOrCreateState(string sessionId)
     {
-        // Use a simple conversation ID (in production, get from context)
-        var conversationId = "default";
-        _stateStore[conversationId] = state;
+        if (_stateStore.TryGetValue(sessionId, out var existing))
+        {
+            return existing;
+        }
+        var newState = new MarketingCampaignState();
+        var newCampaignId = Guid.NewGuid().ToString();
+        _stateStore[sessionId] = (newCampaignId, newState);
+        return (newCampaignId, newState);
+    }
+
+    private static void StoreState(string sessionId, string campaignId, MarketingCampaignState state)
+    {
+        _stateStore[sessionId] = (campaignId, state);
     }
 
     private static List<string> ExtractSelectedMarkets(string result)
@@ -419,10 +432,15 @@ public sealed class CampaignPlannerExecutor : Executor<MarketingInputEvent, AICo
 {
     private readonly ILogger<CampaignPlannerExecutor> _logger;
     private readonly AIAgent _agent;
+    private readonly ICampaignPersistenceService _persistenceService;
 
-    public CampaignPlannerExecutor(ILogger<CampaignPlannerExecutor> logger, IChatClient chatClient) : base("CampaignPlanner")
+    public CampaignPlannerExecutor(
+        ILogger<CampaignPlannerExecutor> logger, 
+        IChatClient chatClient,
+        ICampaignPersistenceService persistenceService) : base("CampaignPlanner")
     {
         _logger = logger;
+        _persistenceService = persistenceService;
         _agent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
         {
             Name = "CampaignPlannerAgent",
@@ -468,6 +486,50 @@ public sealed class CampaignPlannerExecutor : Executor<MarketingInputEvent, AICo
             // Parse the plan and store in state
             input.State.CampaignPlan = TryParseCampaignPlan(responseText);
 
+            // Persist campaign and plan to Cosmos DB
+            if (!string.IsNullOrEmpty(input.CampaignId) && !string.IsNullOrEmpty(input.SessionId))
+            {
+                try
+                {
+                    var campaign = await _persistenceService.GetCampaignAsync(input.CampaignId, input.SessionId, cancellationToken);
+                    if (campaign == null)
+                    {
+                        // Use the pre-generated CampaignId from the workflow state
+                        campaign = await _persistenceService.CreateCampaignAsync(input.SessionId, input.Input, input.CampaignId, cancellationToken);
+                        _logger.LogInformation("Created new campaign in Cosmos DB with ID: {CampaignId}", campaign.Id);
+                    }
+                    
+                    // Update campaign with plan
+                    if (input.State.CampaignPlan != null)
+                    {
+                        campaign.Plan = new CampaignPlanData
+                        {
+                            Objectives = input.State.CampaignPlan.Objectives,
+                            TargetAudience = input.State.CampaignPlan.TargetAudience,
+                            Platforms = input.State.CampaignPlan.Platforms,
+                            Timeline = input.State.CampaignPlan.Timeline,
+                            Budget = input.State.CampaignPlan.Budget,
+                            ToneStyle = input.State.CampaignPlan.ToneStyle,
+                            KeyMessages = input.State.CampaignPlan.KeyMessages
+                        };
+                    }
+                    campaign.Status = CampaignStatus.InProgress;
+                    campaign.CurrentStep = nameof(MarketingWorkflowSteps.CampaignPlanning);
+                    await _persistenceService.UpdateCampaignAsync(campaign, cancellationToken);
+                    
+                    // Save checkpoint
+                    await _persistenceService.SaveCheckpointAsync(
+                        input.CampaignId,
+                        nameof(MarketingWorkflowSteps.CampaignPlanning),
+                        JsonSerializer.Serialize(input.State),
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to persist campaign plan");
+                }
+            }
+
             // Return approval request for creative generation phase
             return ApprovalRequestHelper.CreateApprovalRequest(
                 functionName: "approve_campaign_plan",
@@ -508,16 +570,19 @@ public sealed class CreativeGeneratorExecutor : Executor<MarketingInputEvent, AI
     private readonly ILogger<CreativeGeneratorExecutor> _logger;
     private readonly IChatClient _chatClient;
     private readonly IImageGenerator _imageGenerator;
+    private readonly ICampaignPersistenceService _persistenceService;
     private readonly AIAgent _captionAgent;
 
     public CreativeGeneratorExecutor(
         ILogger<CreativeGeneratorExecutor> logger,
         IChatClient chatClient,
-        IImageGenerator imageGenerator) : base("CreativeGenerator")
+        IImageGenerator imageGenerator,
+        ICampaignPersistenceService persistenceService) : base("CreativeGenerator")
     {
         _logger = logger;
         _chatClient = chatClient;
         _imageGenerator = imageGenerator;
+        _persistenceService = persistenceService;
         _captionAgent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
         {
             Name = "CaptionAgent",
@@ -542,7 +607,8 @@ public sealed class CreativeGeneratorExecutor : Executor<MarketingInputEvent, AI
     {
         try
         {
-            _logger.LogInformation("Creative Generator starting asset generation");
+            _logger.LogInformation("Creative Generator starting asset generation for CampaignId: {CampaignId}, SessionId: {SessionId}", 
+                input.CampaignId ?? "(null)", input.SessionId ?? "(null)");
 
             var campaignPlan = input.State.CampaignPlan;
             var feedback = input.State.UserFeedback;
@@ -555,6 +621,31 @@ public sealed class CreativeGeneratorExecutor : Executor<MarketingInputEvent, AI
                 if (imageAsset != null)
                 {
                     assets.Add(imageAsset);
+                    
+                    // Persist asset to Blob Storage and Cosmos DB
+                    if (!string.IsNullOrEmpty(input.CampaignId))
+                    {
+                        _logger.LogInformation("Persisting image asset {Index} for campaign {CampaignId}", i, input.CampaignId);
+                        try
+                        {
+                            await _persistenceService.SaveAssetAsync(
+                                input.CampaignId,
+                                imageAsset.Url,
+                                AssetType.Image,
+                                imageAsset.Caption,
+                                imageAsset.Hashtags,
+                                cancellationToken);
+                            _logger.LogInformation("Successfully persisted image asset {Index} for campaign {CampaignId}", i, input.CampaignId);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to persist image asset {Index} for campaign {CampaignId}", i, input.CampaignId);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Cannot persist image asset {Index} - CampaignId is null or empty", i);
+                    }
                 }
             }
 
@@ -564,6 +655,23 @@ public sealed class CreativeGeneratorExecutor : Executor<MarketingInputEvent, AI
 
             input.State.CreativeAssets = assets;
             _logger.LogInformation("Generated {Count} creative assets", assets.Count);
+
+            // Save checkpoint
+            if (!string.IsNullOrEmpty(input.CampaignId))
+            {
+                try
+                {
+                    await _persistenceService.SaveCheckpointAsync(
+                        input.CampaignId,
+                        nameof(MarketingWorkflowSteps.CreativeGeneration),
+                        JsonSerializer.Serialize(input.State),
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to save checkpoint");
+                }
+            }
 
             // Pass assets directly to avoid double-serialization
             return ApprovalRequestHelper.CreateApprovalRequest(
@@ -701,6 +809,7 @@ public sealed class CreativeGeneratorExecutor : Executor<MarketingInputEvent, AI
 public sealed class LocalizerExecutor : Executor<MarketingInputEvent, AIContent>
 {
     private readonly ILogger<LocalizerExecutor> _logger;
+    private readonly ICampaignPersistenceService _persistenceService;
     private readonly AIAgent _translationAgent;
 
     private static readonly Dictionary<string, string> MarketLanguages = new()
@@ -714,9 +823,13 @@ public sealed class LocalizerExecutor : Executor<MarketingInputEvent, AIContent>
         { "Japan", "Japanese" }
     };
 
-    public LocalizerExecutor(ILogger<LocalizerExecutor> logger, IChatClient chatClient) : base("Localizer")
+    public LocalizerExecutor(
+        ILogger<LocalizerExecutor> logger, 
+        IChatClient chatClient,
+        ICampaignPersistenceService persistenceService) : base("Localizer")
     {
         _logger = logger;
+        _persistenceService = persistenceService;
         _translationAgent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
         {
             Name = "TranslationAgent",
@@ -867,11 +980,16 @@ public sealed class LocalizerExecutor : Executor<MarketingInputEvent, AIContent>
 public sealed class ScheduleCreatorExecutor : Executor<MarketingInputEvent, AIContent>
 {
     private readonly ILogger<ScheduleCreatorExecutor> _logger;
+    private readonly ICampaignPersistenceService _persistenceService;
     private readonly AIAgent _scheduleAgent;
 
-    public ScheduleCreatorExecutor(ILogger<ScheduleCreatorExecutor> logger, IChatClient chatClient) : base("ScheduleCreator")
+    public ScheduleCreatorExecutor(
+        ILogger<ScheduleCreatorExecutor> logger, 
+        IChatClient chatClient,
+        ICampaignPersistenceService persistenceService) : base("ScheduleCreator")
     {
         _logger = logger;
+        _persistenceService = persistenceService;
         _scheduleAgent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
         {
             Name = "ScheduleAgent",
@@ -985,10 +1103,14 @@ public sealed class ScheduleCreatorExecutor : Executor<MarketingInputEvent, AICo
 public sealed class InstagramPublisherExecutor : Executor<MarketingInputEvent, AIContent>
 {
     private readonly ILogger<InstagramPublisherExecutor> _logger;
+    private readonly ICampaignPersistenceService _persistenceService;
 
-    public InstagramPublisherExecutor(ILogger<InstagramPublisherExecutor> logger) : base("InstagramPublisher")
+    public InstagramPublisherExecutor(
+        ILogger<InstagramPublisherExecutor> logger,
+        ICampaignPersistenceService persistenceService) : base("InstagramPublisher")
     {
         _logger = logger;
+        _persistenceService = persistenceService;
     }
 
     public override async ValueTask<AIContent> HandleAsync(
@@ -1066,23 +1188,49 @@ public sealed class InstagramPublisherExecutor : Executor<MarketingInputEvent, A
 public sealed class CampaignCompletedExecutor : Executor<MarketingInputEvent, AIContent>
 {
     private readonly ILogger<CampaignCompletedExecutor> _logger;
+    private readonly ICampaignPersistenceService _persistenceService;
 
-    public CampaignCompletedExecutor(ILogger<CampaignCompletedExecutor> logger) : base("CampaignCompleted")
+    public CampaignCompletedExecutor(
+        ILogger<CampaignCompletedExecutor> logger,
+        ICampaignPersistenceService persistenceService) : base("CampaignCompleted")
     {
         _logger = logger;
+        _persistenceService = persistenceService;
     }
 
-    public override ValueTask<AIContent> HandleAsync(
+    public override async ValueTask<AIContent> HandleAsync(
         MarketingInputEvent input,
         IWorkflowContext context,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Campaign workflow completed successfully.");
         
+        // Mark campaign as completed in persistence
+        if (!string.IsNullOrEmpty(input.CampaignId) && !string.IsNullOrEmpty(input.SessionId))
+        {
+            try
+            {
+                var campaign = await _persistenceService.GetCampaignAsync(input.CampaignId, input.SessionId, cancellationToken);
+                if (campaign != null)
+                {
+                    campaign.Status = CampaignStatus.Completed;
+                    campaign.CurrentStep = nameof(MarketingWorkflowSteps.Completed);
+                    await _persistenceService.UpdateCampaignAsync(campaign, cancellationToken);
+                    
+                    await _persistenceService.SaveCheckpointAsync(
+                        input.CampaignId,
+                        nameof(MarketingWorkflowSteps.Completed),
+                        null,
+                        cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update campaign completion status");
+            }
+        }
+        
         // Return a simple text message indicating the workflow is complete
-        // This prevents the workflow from looping back to the beginning
-        return ValueTask.FromResult<AIContent>(
-            new TextContent("Your marketing campaign has been completed successfully! Feel free to start a new campaign whenever you're ready.")
-        );
+        return new TextContent("Your marketing campaign has been completed successfully! Feel free to start a new campaign whenever you're ready.");
     }
 }

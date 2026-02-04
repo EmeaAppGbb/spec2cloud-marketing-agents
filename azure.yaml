@@ -28,4 +28,13 @@ hooks:
       shell: pwsh
       run: ./infra/scripts/postprovision.ps1
       continueOnError: false
+  predeploy:
+    posix:
+      shell: sh
+      run: ./infra/scripts/predeploy.sh
+      continueOnError: false
+    windows:
+      shell: pwsh
+      run: ./infra/scripts/predeploy.ps1
+      continueOnError: false
 
