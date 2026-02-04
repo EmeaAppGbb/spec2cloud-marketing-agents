@@ -1,4 +1,4 @@
-import { CopilotKit } from "@copilotkit/react-core"; 
+import { CopilotKitProvider } from "./components/CopilotKitProvider";
 import "@copilotkit/react-ui/styles.css";
 import "./globals.css";
 
@@ -11,9 +11,9 @@ export default function RootLayout({ children }: {children: React.ReactNode}) {
         <title>Marketing Campaign Studio</title>
       </head>
       <body>
-        <CopilotKit runtimeUrl="/api/copilotkit" agent="my_agent">
+        <CopilotKitProvider>
           {children}
-        </CopilotKit>
+        </CopilotKitProvider>
       </body>
     </html>
   );

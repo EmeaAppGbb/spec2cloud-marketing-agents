@@ -87,6 +87,22 @@ module cosmos 'br/public:avm/res/document-db/database-account:0.8.1' = {
       {
         name: 'agentic-storage'
         containers: [
+          {
+            name: 'campaigns'
+            paths: ['/sessionId']
+          }
+          {
+            name: 'assets'
+            paths: ['/campaignId']
+          }
+          {
+            name: 'workflow-state'
+            paths: ['/campaignId']
+          }
+          {
+            name: 'conversations'
+            paths: ['/campaignId']
+          }
         ]
       }
     ]
@@ -101,6 +117,44 @@ module cosmos 'br/public:avm/res/document-db/database-account:0.8.1' = {
       }
     ]
     capabilitiesToAdd: [ 'EnableServerless' ]
+  }
+}
+
+// Storage account for campaign assets (images, videos)
+module storageAccount 'br/public:avm/res/storage/storage-account:0.9.1' = {
+  name: 'storage'
+  params: {
+    name: '${abbrs.storageStorageAccounts}${resourceToken}'
+    location: location
+    tags: union(tags, { SecurityControl: 'Ignore' })
+    skuName: 'Standard_LRS'
+    kind: 'StorageV2'
+    publicNetworkAccess: 'Enabled'
+    allowBlobPublicAccess: true
+    blobServices: {
+      containers: [
+        {
+          name: 'campaign-assets'
+          publicAccess: 'Blob'
+        }
+      ]
+    }
+    roleAssignments: concat(
+      principalType == 'User' ? [
+        {
+          principalId: principalId
+          principalType: 'User'
+          roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+        }
+      ] : [],
+      [
+        {
+          principalId: agenticApiIdentity.outputs.principalId
+          principalType: 'ServicePrincipal'
+          roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+        }
+      ]
+    )
   }
 }
 module search 'br/public:avm/res/search/search-service:0.10.0' = {
@@ -214,6 +268,10 @@ module agenticApi 'br/public:avm/res/app/container-app:0.8.0' = {
           {
             name: 'AZURE_COSMOS_ENDPOINT'
             value: cosmos.outputs.endpoint
+          }
+          {
+            name: 'AZURE_STORAGE_ENDPOINT'
+            value: storageAccount.outputs.primaryBlobEndpoint
           }
           {
             name: 'AZURE_AI_SEARCH_ENDPOINT'
@@ -348,9 +406,14 @@ module agenticUi 'br/public:avm/res/app/container-app:0.8.0' = {
   }
 }
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerRegistry.outputs.loginServer
+output AZURE_CONTAINER_APPS_ENVIRONMENT_DEFAULT_DOMAIN string = containerAppsEnvironment.outputs.defaultDomain
+output AZURE_CONTAINER_APP_AGENTIC_API_FQDN string = 'agentic-api.${containerAppsEnvironment.outputs.defaultDomain}'
 output AZURE_RESOURCE_AGENTIC_API_ID string = agenticApi.outputs.resourceId
 output AZURE_RESOURCE_AGENTIC_UI_ID string = agenticUi.outputs.resourceId
-output AZURE_RESOURCE_AGENTIC_STORAGE_ID string = '${cosmos.outputs.resourceId}/sqlDatabases/agentic-storage'
+output AZURE_RESOURCE_COSMOS_ID string = '${cosmos.outputs.resourceId}/sqlDatabases/agentic-storage'
+output AZURE_COSMOS_ENDPOINT string = cosmos.outputs.endpoint
 output AZURE_AI_SEARCH_ENDPOINT string = search.outputs.endpoint
 output AZURE_RESOURCE_SEARCH_ID string = search.outputs.resourceId
 output aiSearchName string = search.outputs.name
+output AZURE_STORAGE_ENDPOINT string = storageAccount.outputs.primaryBlobEndpoint
+output AZURE_RESOURCE_STORAGE_ID string = storageAccount.outputs.resourceId

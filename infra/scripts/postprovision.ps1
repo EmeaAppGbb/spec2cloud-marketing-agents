@@ -34,6 +34,8 @@ foreach ($line in $azdEnvOutput) {
 $OPENAI_ENDPOINT = if ($envVars.ContainsKey('AZURE_OPENAI_ENDPOINT')) { $envVars['AZURE_OPENAI_ENDPOINT'] } else { "" }
 $OPENAI_DEPLOYMENT = if ($envVars.ContainsKey('AZURE_OPENAI_DEPLOYMENT_NAME')) { $envVars['AZURE_OPENAI_DEPLOYMENT_NAME'] } else { "" }
 $IMAGE_MODEL_DEPLOYMENT = if ($envVars.ContainsKey('AZURE_IMAGE_MODEL_DEPLOYMENT_NAME')) { $envVars['AZURE_IMAGE_MODEL_DEPLOYMENT_NAME'] } else { "" }
+$COSMOS_ENDPOINT = if ($envVars.ContainsKey('AZURE_COSMOS_ENDPOINT')) { $envVars['AZURE_COSMOS_ENDPOINT'] } else { "" }
+$STORAGE_ENDPOINT = if ($envVars.ContainsKey('AZURE_STORAGE_ENDPOINT')) { $envVars['AZURE_STORAGE_ENDPOINT'] } else { "" }
 
 # Validate required variables
 if ([string]::IsNullOrEmpty($OPENAI_ENDPOINT)) {
@@ -51,12 +53,24 @@ if ([string]::IsNullOrEmpty($IMAGE_MODEL_DEPLOYMENT)) {
     $IMAGE_MODEL_DEPLOYMENT = ""
 }
 
+if ([string]::IsNullOrEmpty($COSMOS_ENDPOINT)) {
+    Write-Host "Warning: AZURE_COSMOS_ENDPOINT environment variable is not set" -ForegroundColor Yellow
+    $COSMOS_ENDPOINT = ""
+}
+
+if ([string]::IsNullOrEmpty($STORAGE_ENDPOINT)) {
+    Write-Host "Warning: AZURE_STORAGE_ENDPOINT environment variable is not set" -ForegroundColor Yellow
+    $STORAGE_ENDPOINT = ""
+}
+
 # Update the settings file
 try {
     $settingsContent = Get-Content $SETTINGS_FILE -Raw | ConvertFrom-Json
     $settingsContent.Parameters.openAiEndpoint = $OPENAI_ENDPOINT
     $settingsContent.Parameters.openAiDeployment = $OPENAI_DEPLOYMENT
     $settingsContent.Parameters.imageModelDeployment = $IMAGE_MODEL_DEPLOYMENT
+    $settingsContent.Parameters.cosmosEndpoint = $COSMOS_ENDPOINT
+    $settingsContent.Parameters.storageEndpoint = $STORAGE_ENDPOINT
     $settingsContent | ConvertTo-Json -Depth 10 | Set-Content $SETTINGS_FILE
 } catch {
     Write-Host "Error updating settings file: $_" -ForegroundColor Red
@@ -67,3 +81,5 @@ Write-Host "apphost.settings.json configured successfully!" -ForegroundColor Gre
 Write-Host "  - OpenAI Endpoint: $OPENAI_ENDPOINT" -ForegroundColor Cyan
 Write-Host "  - OpenAI Deployment: $OPENAI_DEPLOYMENT" -ForegroundColor Cyan
 Write-Host "  - Image Model Deployment: $IMAGE_MODEL_DEPLOYMENT" -ForegroundColor Cyan
+Write-Host "  - Cosmos Endpoint: $COSMOS_ENDPOINT" -ForegroundColor Cyan
+Write-Host "  - Storage Endpoint: $STORAGE_ENDPOINT" -ForegroundColor Cyan

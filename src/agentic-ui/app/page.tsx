@@ -1,7 +1,9 @@
 "use client";
 import { CopilotSidebar } from "@copilotkit/react-ui";
 import { useHumanInTheLoop } from "@copilotkit/react-core";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSession } from "./hooks/useSession";
+import { CampaignHistory } from "./components/CampaignHistory";
 
 // Agent badge component with distinct colors for each agent type
 function AgentBadge({ agentName }: { agentName: string }) {
@@ -52,40 +54,140 @@ function JsonDisplay({ data, title }: { data: string; title?: string }) {
   );
 }
 
+// Campaign Data Table component - displays campaign data in a nice readable table format
+function CampaignDataTable({ data }: { data: Record<string, unknown> }) {
+  // Helper to format field names from camelCase to Title Case
+  const formatFieldName = (key: string): string => {
+    return key
+      .replace(/([A-Z])/g, ' $1') // Add space before uppercase
+      .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+      .trim();
+  };
+
+  // Helper to render a value based on its type
+  const renderValue = (value: unknown): React.ReactNode => {
+    if (value === null || value === undefined) {
+      return <span className="text-gray-400 dark:text-gray-500 italic">Not specified</span>;
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return <span className="text-gray-400 dark:text-gray-500 italic">None</span>;
+      }
+      // Deduplicate array items
+      const uniqueItems = [...new Set(value.map(v => String(v)))];
+      return (
+        <div className="flex flex-wrap gap-1.5">
+          {uniqueItems.map((item, i) => (
+            <span key={i} className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-200 rounded text-sm">
+              {item}
+            </span>
+          ))}
+        </div>
+      );
+    }
+    if (typeof value === 'object') {
+      return <span className="text-gray-700 dark:text-gray-300 text-sm">{JSON.stringify(value)}</span>;
+    }
+    return <span className="text-gray-700 dark:text-gray-300 text-sm">{String(value)}</span>;
+  };
+
+  // Define field icons for common campaign fields
+  const fieldIcons: Record<string, string> = {
+    objectives: '🎯',
+    targetAudience: '👥',
+    platforms: '📱',
+    timeline: '⏱️',
+    budget: '💰',
+    toneStyle: '🎨',
+    keyMessages: '💬',
+  };
+
+  const entries = Object.entries(data).filter(([, value]) => value !== undefined);
+
+  if (entries.length === 0) {
+    return <p className="text-gray-500 dark:text-gray-400 text-sm">No data available</p>;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+      <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <thead className="bg-gray-50 dark:bg-gray-800">
+          <tr>
+            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider w-1/4">
+              Field
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+              Value
+            </th>
+          </tr>
+        </thead>
+        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+          {entries.map(([key, value], index) => (
+            <tr key={key} className={index % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-800/50'}>
+              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 align-top">
+                <div className="flex items-center gap-2">
+                  <span>{fieldIcons[key] || '📋'}</span>
+                  <span>{formatFieldName(key)}</span>
+                </div>
+              </td>
+              <td className="px-4 py-3 align-top">
+                {renderValue(value)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // Campaign Strategy display component with proper UI
 function CampaignStrategyDisplay({ data }: { data: string }) {
-  let strategy: {
-    Objectives?: string;
-    TargetAudience?: string;
-    Platforms?: string[];
-    Timeline?: string;
-    Budget?: string | null;
-    ToneStyle?: string;
-    KeyMessages?: string[];
-  };
+  // Normalized strategy interface (handles both PascalCase and camelCase from backend)
+  interface ParsedStrategy {
+    objectives?: string;
+    targetAudience?: string;
+    platforms?: string[];
+    timeline?: string;
+    budget?: string | null;
+    toneStyle?: string;
+    keyMessages?: string[];
+  }
   
   // Debug: Log the incoming data
   console.log("CampaignStrategyDisplay - raw data:", data);
   
+  let rawParsed: Record<string, unknown>;
   try {
-    strategy = JSON.parse(data);
-    console.log("CampaignStrategyDisplay - parsed strategy:", strategy);
+    rawParsed = JSON.parse(data);
+    console.log("CampaignStrategyDisplay - parsed strategy:", rawParsed);
   } catch (error) {
     console.error("CampaignStrategyDisplay - parse error:", error);
     return <JsonDisplay data={data} title="Campaign Strategy (Parse Error)" />;
   }
 
-  // Check if we have any data to display (using PascalCase to match backend serialization)
-  const hasAnyData = strategy.Objectives || strategy.TargetAudience || 
-                     (strategy.Platforms && strategy.Platforms.length > 0) || 
-                     strategy.Timeline || strategy.ToneStyle || 
-                     (strategy.KeyMessages && strategy.KeyMessages.length > 0);
+  // Normalize to camelCase (handle both PascalCase and camelCase from backend)
+  const strategy: ParsedStrategy = {
+    objectives: (rawParsed.objectives ?? rawParsed.Objectives) as string | undefined,
+    targetAudience: (rawParsed.targetAudience ?? rawParsed.TargetAudience) as string | undefined,
+    platforms: (rawParsed.platforms ?? rawParsed.Platforms) as string[] | undefined,
+    timeline: (rawParsed.timeline ?? rawParsed.Timeline) as string | undefined,
+    budget: (rawParsed.budget ?? rawParsed.Budget) as string | null | undefined,
+    toneStyle: (rawParsed.toneStyle ?? rawParsed.ToneStyle) as string | undefined,
+    keyMessages: (rawParsed.keyMessages ?? rawParsed.KeyMessages) as string[] | undefined,
+  };
+
+  // Check if we have any data to display
+  const hasAnyData = strategy.objectives || strategy.targetAudience || 
+                     (strategy.platforms && strategy.platforms.length > 0) || 
+                     strategy.timeline || strategy.toneStyle || 
+                     (strategy.keyMessages && strategy.keyMessages.length > 0);
 
   if (!hasAnyData) {
     return (
       <div className="bg-yellow-100 dark:bg-yellow-900/20 p-4 rounded">
         <p className="text-yellow-800 dark:text-yellow-200 mb-2">No campaign data to display</p>
-        <JsonDisplay data={data} title="Raw Data" />
+        <CampaignDataTable data={rawParsed} />
       </div>
     );
   }
@@ -93,34 +195,34 @@ function CampaignStrategyDisplay({ data }: { data: string }) {
   return (
     <div className="space-y-4">
       {/* Objectives */}
-      {strategy.Objectives && (
+      {strategy.objectives && (
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-blue-500">
           <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
             <span className="text-blue-500">🎯</span> Objectives
           </h4>
-          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.Objectives}</p>
+          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.objectives}</p>
         </div>
       )}
 
       {/* Target Audience */}
-      {strategy.TargetAudience && (
+      {strategy.targetAudience && (
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-purple-500">
           <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
             <span className="text-purple-500">👥</span> Target Audience
           </h4>
-          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.TargetAudience}</p>
+          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.targetAudience}</p>
         </div>
       )}
 
       {/* Platforms & Timeline */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {strategy.Platforms && strategy.Platforms.length > 0 && (
+        {strategy.platforms && strategy.platforms.length > 0 && (
           <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-pink-500">
             <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
               <span className="text-pink-500">📱</span> Platforms
             </h4>
             <div className="flex flex-wrap gap-2">
-              {strategy.Platforms.map((platform, i) => (
+              {strategy.platforms.map((platform, i) => (
                 <span key={i} className="px-3 py-1 bg-pink-100 dark:bg-pink-900 text-pink-800 dark:text-pink-200 rounded-full text-sm font-medium">
                   {platform}
                 </span>
@@ -129,34 +231,34 @@ function CampaignStrategyDisplay({ data }: { data: string }) {
           </div>
         )}
 
-        {strategy.Timeline && (
+        {strategy.timeline && (
           <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-orange-500">
             <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
               <span className="text-orange-500">⏱️</span> Timeline
             </h4>
-            <p className="text-gray-700 dark:text-gray-300 text-sm font-medium">{strategy.Timeline}</p>
+            <p className="text-gray-700 dark:text-gray-300 text-sm font-medium">{strategy.timeline}</p>
           </div>
         )}
       </div>
 
       {/* Tone & Style */}
-      {strategy.ToneStyle && (
+      {strategy.toneStyle && (
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-green-500">
           <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
             <span className="text-green-500">🎨</span> Tone & Style
           </h4>
-          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.ToneStyle}</p>
+          <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">{strategy.toneStyle}</p>
         </div>
       )}
 
       {/* Key Messages */}
-      {strategy.KeyMessages && strategy.KeyMessages.length > 0 && (
+      {strategy.keyMessages && strategy.keyMessages.length > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border-l-4 border-yellow-500">
           <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
             <span className="text-yellow-500">💬</span> Key Messages
           </h4>
           <ul className="space-y-2">
-            {strategy.KeyMessages.map((message, i) => (
+            {strategy.keyMessages.map((message, i) => (
               <li key={i} className="flex gap-2 text-gray-700 dark:text-gray-300 text-sm">
                 <span className="text-yellow-500 font-bold mt-0.5">•</span>
                 <span className="leading-relaxed">{message}</span>
@@ -249,6 +351,168 @@ function ScheduleTable({ schedule }: { schedule: { posts?: Array<{ scheduledTime
   );
 }
 
+// Campaign Summary Display component - displays the full campaign summary in a readable format
+interface CampaignSummaryData {
+  campaignPlan?: {
+    objectives?: string;
+    targetAudience?: string;
+    platforms?: string[];
+    timeline?: string;
+    toneStyle?: string;
+    keyMessages?: string[];
+  };
+  creativeAssets?: Array<{
+    type?: string;
+    url?: string;
+    caption?: string;
+    hashtags?: string[];
+  }>;
+  localizedContent?: Record<string, { market?: string; language?: string; assets?: unknown[] }>;
+  schedule?: {
+    startDate?: string;
+    endDate?: string;
+    posts?: unknown[];
+  };
+  publishedPost?: {
+    success?: boolean;
+    postId?: string;
+    postUrl?: string;
+    publishedAt?: string;
+  };
+  status?: string;
+}
+
+function CampaignSummaryDisplay({ data }: { data: string }) {
+  let summary: CampaignSummaryData;
+  try {
+    summary = JSON.parse(data);
+  } catch {
+    return <JsonDisplay data={data} title="Campaign Summary (Parse Error)" />;
+  }
+
+  return (
+    <div className="space-y-4 max-h-96 overflow-y-auto">
+      {/* Status Banner */}
+      {summary.status && (
+        <div className={`p-3 rounded-lg ${
+          summary.status.toLowerCase().includes('success') 
+            ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200' 
+            : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200'
+        }`}>
+          <p className="font-medium text-sm">{summary.status}</p>
+        </div>
+      )}
+
+      {/* Campaign Plan Summary */}
+      {summary.campaignPlan && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-blue-50 dark:bg-blue-900/30 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-blue-800 dark:text-blue-200 flex items-center gap-2">
+              <span>📋</span> Campaign Plan
+            </h4>
+          </div>
+          <div className="p-4 space-y-2 text-sm">
+            {summary.campaignPlan.objectives && (
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Objectives:</span> <span className="text-gray-600 dark:text-gray-400">{summary.campaignPlan.objectives}</span></div>
+            )}
+            {summary.campaignPlan.targetAudience && (
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Target Audience:</span> <span className="text-gray-600 dark:text-gray-400">{summary.campaignPlan.targetAudience}</span></div>
+            )}
+            {summary.campaignPlan.platforms && summary.campaignPlan.platforms.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-medium text-gray-700 dark:text-gray-300">Platforms:</span>
+                {[...new Set(summary.campaignPlan.platforms)].map((p, i) => (
+                  <span key={i} className="px-2 py-0.5 bg-pink-100 dark:bg-pink-900/50 text-pink-800 dark:text-pink-200 rounded text-xs">{p}</span>
+                ))}
+              </div>
+            )}
+            {summary.campaignPlan.timeline && (
+              <div><span className="font-medium text-gray-700 dark:text-gray-300">Timeline:</span> <span className="text-gray-600 dark:text-gray-400">{summary.campaignPlan.timeline}</span></div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Creative Assets Summary */}
+      {summary.creativeAssets && summary.creativeAssets.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-green-50 dark:bg-green-900/30 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-green-800 dark:text-green-200 flex items-center gap-2">
+              <span>🎨</span> Creative Assets ({summary.creativeAssets.length})
+            </h4>
+          </div>
+          <div className="p-4 grid grid-cols-3 gap-2">
+            {summary.creativeAssets.map((asset, i) => (
+              <div key={i} className="p-2 bg-gray-50 dark:bg-gray-700 rounded text-center">
+                <span className="text-xl">{asset.type === 'video' ? '🎬' : '🖼️'}</span>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{asset.type || 'Asset'} {i + 1}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Localization Summary */}
+      {summary.localizedContent && Object.keys(summary.localizedContent).length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-purple-50 dark:bg-purple-900/30 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-purple-800 dark:text-purple-200 flex items-center gap-2">
+              <span>🌍</span> Localized Markets ({Object.keys(summary.localizedContent).length})
+            </h4>
+          </div>
+          <div className="p-4 flex flex-wrap gap-2">
+            {Object.entries(summary.localizedContent).map(([market, data]) => (
+              <span key={market} className="px-2 py-1 bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-200 rounded text-sm">
+                {market} ({data.language || 'Localized'})
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Schedule Summary */}
+      {summary.schedule && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="bg-orange-50 dark:bg-orange-900/30 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-orange-800 dark:text-orange-200 flex items-center gap-2">
+              <span>📅</span> Publishing Schedule
+            </h4>
+          </div>
+          <div className="p-4 text-sm">
+            <p className="text-gray-700 dark:text-gray-300">
+              <span className="font-medium">{summary.schedule.posts?.length || 0} posts</span> scheduled
+              {summary.schedule.startDate && summary.schedule.endDate && (
+                <span> from {new Date(summary.schedule.startDate).toLocaleDateString()} to {new Date(summary.schedule.endDate).toLocaleDateString()}</span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Published Post */}
+      {summary.publishedPost?.success && summary.publishedPost.postUrl && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg border border-green-300 dark:border-green-700 overflow-hidden">
+          <div className="bg-green-100 dark:bg-green-900/30 px-4 py-2 border-b border-green-300 dark:border-green-700">
+            <h4 className="font-semibold text-green-800 dark:text-green-200 flex items-center gap-2">
+              <span>📸</span> Published to Instagram
+            </h4>
+          </div>
+          <div className="p-4">
+            <a 
+              href={summary.publishedPost.postUrl} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-pink-600 dark:text-pink-400 hover:underline text-sm font-medium"
+            >
+              View on Instagram →
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Market selection component with internal state
 function MarketSelector({ 
   markets, 
@@ -309,6 +573,77 @@ export default function Page() {
     schedule?: { posts: Array<{ scheduledTime: string; platform: string; contentType: string; language: string; market: string }> };
     publishedPost?: { postUrl?: string; success?: boolean };
   }>({});
+
+  const [showHistory, setShowHistory] = useState(false);
+  
+  // Session management for campaign persistence
+  const {
+    sessionId,
+    campaigns,
+    selectedCampaign,
+    loading: historyLoading,
+    fetchCampaigns,
+    fetchCampaignDetail,
+    setSelectedCampaign,
+  } = useSession();
+
+  // Fetch campaigns on mount when session is ready
+  useEffect(() => {
+    if (sessionId) {
+      fetchCampaigns();
+    }
+  }, [sessionId, fetchCampaigns]);
+
+  // Handle campaign selection from history
+  const handleCampaignSelect = async (campaignId: string) => {
+    if (!campaignId) {
+      // New campaign - clear state
+      setSelectedCampaign(null);
+      setCampaignState({});
+      return;
+    }
+    
+    const detail = await fetchCampaignDetail(campaignId);
+    console.log("Campaign detail loaded:", detail);
+    console.log("Assets from API:", detail?.assets);
+    
+    if (detail?.campaign) {
+      // Convert persisted assets to the format expected by campaignState
+      // Handle both string ("Image") and numeric (0) enum values for backwards compatibility
+      const restoredAssets = detail.assets?.map((asset: { type: string | number; blobUrl: string; caption?: string; hashtags?: string[] }) => {
+        // Convert type: handle both string ("Image", "Video") and numeric (0, 1) formats
+        let assetType = 'image';
+        if (typeof asset.type === 'number') {
+          assetType = asset.type === 0 ? 'image' : 'video';
+        } else if (typeof asset.type === 'string') {
+          assetType = asset.type.toLowerCase();
+        }
+        
+        console.log("Restored asset:", { type: assetType, url: asset.blobUrl, caption: asset.caption });
+        
+        return {
+          type: assetType,
+          url: asset.blobUrl,
+          caption: asset.caption,
+          hashtags: asset.hashtags || []
+        };
+      }) || [];
+
+      console.log("All restored assets:", restoredAssets);
+
+      // Restore campaign state from persisted data
+      setCampaignState({
+        plan: detail.campaign.plan,
+        assets: restoredAssets.length > 0 ? restoredAssets : undefined,
+        localizedContent: detail.campaign.localizedContent,
+        schedule: detail.campaign.schedule ? { posts: [] } : undefined,
+        publishedPost: detail.campaign.publishResult ? { 
+          postUrl: detail.campaign.publishResult.postUrl,
+          success: !!detail.campaign.publishResult.postId 
+        } : undefined,
+      });
+    }
+  };
 
   // Human Gate 1: Campaign Plan Approval
   useHumanInTheLoop({
@@ -644,7 +979,7 @@ export default function Page() {
             </div>
           )}
 
-          <JsonDisplay data={args.summary} title="Campaign Summary" />
+          <CampaignSummaryDisplay data={args.summary} />
           
           <div className="flex gap-3 mt-4">
             <button 
@@ -663,17 +998,48 @@ export default function Page() {
   });
 
   return (
-    <CopilotSidebar
-      defaultOpen={true}
-      labels={{
-        title: "Marketing Campaign AI",
-        initial: "👋 Welcome! I'm your AI marketing assistant. Tell me about your campaign idea and I'll help you create a complete social media strategy with images, captions, translations, and a publishing schedule.",
-        placeholder: "Describe your campaign brief...",
-      }}
-      instructions="You are an AI marketing assistant that helps create complete social media campaigns. Guide the user through campaign planning, creative asset generation, localization, and publishing."
-    >
-      <main className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 dark:from-gray-900 dark:to-purple-900">
-        <div className="container mx-auto px-4 py-12 max-w-5xl">
+    <div className="flex h-screen">
+      {/* Campaign History Sidebar */}
+      {showHistory && (
+        <div className="w-80 flex-shrink-0">
+          <CampaignHistory
+            campaigns={campaigns}
+            onSelect={handleCampaignSelect}
+            onRefresh={() => fetchCampaigns()}
+            loading={historyLoading}
+            selectedCampaignId={selectedCampaign?.campaign?.id}
+          />
+        </div>
+      )}
+      
+      {/* History Toggle Button */}
+      <button
+        onClick={() => setShowHistory(!showHistory)}
+        className="fixed left-0 top-1/2 -translate-y-1/2 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-r-lg px-2 py-4 shadow-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+        title={showHistory ? "Hide campaign history" : "Show campaign history"}
+      >
+        <svg
+          className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${showHistory ? "rotate-180" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+
+      <div className="flex-1">
+        <CopilotSidebar
+          defaultOpen={true}
+          labels={{
+            title: "Marketing Campaign AI",
+            initial: "👋 Welcome! I'm your AI marketing assistant. Tell me about your campaign idea and I'll help you create a complete social media strategy with images, captions, translations, and a publishing schedule.",
+            placeholder: "Describe your campaign brief...",
+          }}
+          instructions="You are an AI marketing assistant that helps create complete social media campaigns. Guide the user through campaign planning, creative asset generation, localization, and publishing."
+        >
+          <main className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 dark:from-gray-900 dark:to-purple-900">
+            <div className="container mx-auto px-4 py-12 max-w-5xl">
           {/* Campaign Status Dashboard */}
           {(campaignState.plan || campaignState.assets || campaignState.schedule || campaignState.publishedPost) && (
             <div className="mb-8 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 border-2 border-purple-200 dark:border-purple-700">
@@ -840,7 +1206,9 @@ export default function Page() {
             ))}
           </div>
         </div>
-      </main>
-    </CopilotSidebar>
+        </main>
+      </CopilotSidebar>
+      </div>
+    </div>
   );
 }
