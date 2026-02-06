@@ -100,12 +100,12 @@ module imageModelDeploy 'modules/image-model.bicep' = {
   name: 'image-model-deployment'
   params: {
     aiServicesAccountName: aiModelsDeploy.outputs.aiServicesAccountName
-    deploymentName: 'fluxKontextPro'
+    deploymentName: 'gpt-image-1.5'
     skuName: 'GlobalStandard'
     skuCapacity: 1
-    format: 'Black Forest Labs'
-    modelName: 'FLUX.1-Kontext-pro'
-    modelVersion: '1'
+    format: 'OpenAI'
+    modelName: 'gpt-image-1.5'
+    modelVersion: '2025-12-16'
   }
 }
 

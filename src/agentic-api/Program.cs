@@ -139,8 +139,8 @@ var marketingAgent = new AGUIWorkflowAgent(marketingWorkflow.AsAgent(name: "Mark
 app.MapOpenAIResponses();
 app.MapOpenAIConversations();
 
-// Map the dummy workflow agent to the default AGUI endpoint
-app.MapAGUI("/", marketingAgent);
+// Map the marketing workflow agent to the AGUI endpoint (disable request timeout for long-running SSE streams)
+app.MapAGUI("/", marketingAgent).DisableRequestTimeout();
 
 // Map health check endpoint
 app.MapHealthChecks("/health");

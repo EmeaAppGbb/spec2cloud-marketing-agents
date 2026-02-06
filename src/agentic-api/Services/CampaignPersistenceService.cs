@@ -179,9 +179,14 @@ public class CampaignPersistenceService : ICampaignPersistenceService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to upload asset to blob storage for campaign {CampaignId}, using original URL: {SourceUrl}", campaignId, sourceUrl);
-            blobUrl = sourceUrl; // Fallback to original URL
+            _logger.LogWarning(ex, "Failed to upload asset to blob storage for campaign {CampaignId}", campaignId);
+            throw; // Don't fallback to storing raw data URIs — they exceed Cosmos DB's 2MB item limit
         }
+
+        // Store only the blob URL reference in Cosmos, never the raw source (which may be a large data: URI)
+        var originalUrlForCosmos = sourceUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+            ? null  // data: URIs are too large for Cosmos — the blob is the canonical copy
+            : sourceUrl;
 
         // Save metadata to Cosmos
         var asset = new AssetMetadata
@@ -189,7 +194,7 @@ public class CampaignPersistenceService : ICampaignPersistenceService
             CampaignId = campaignId,
             Type = type,
             BlobUrl = blobUrl,
-            OriginalUrl = sourceUrl,
+            OriginalUrl = originalUrlForCosmos,
             Caption = caption,
             Hashtags = hashtags ?? []
         };

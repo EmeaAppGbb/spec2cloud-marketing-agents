@@ -23,16 +23,22 @@ public class AzureBlobStorageService : IBlobStorageService
     private async Task EnsureContainerExistsAsync(CancellationToken ct = default)
     {
         if (_containerInitialized) return;
-        
+
         try
         {
-            await _containerClient.CreateIfNotExistsAsync(PublicAccessType.Blob, cancellationToken: ct);
-            _containerInitialized = true;
-            _logger.LogInformation("Blob container 'campaign-assets' is ready");
+            // Container is provisioned by infrastructure (Bicep) - just verify it exists.
+            // Avoid CreateIfNotExistsAsync which issues a PUT that may require elevated permissions.
+            if (await _containerClient.ExistsAsync(ct))
+            {
+                _containerInitialized = true;
+                return;
+            }
+
+            _logger.LogError("Blob container 'campaign-assets' does not exist. Ensure infrastructure has been provisioned (azd provision).");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to ensure container exists - continuing anyway");
+            _logger.LogWarning(ex, "Failed to verify container existence - continuing anyway");
         }
     }
 
@@ -56,13 +62,49 @@ public class AzureBlobStorageService : IBlobStorageService
 
     public async Task<string> UploadFromUrlAsync(string campaignId, string fileName, string sourceUrl, CancellationToken ct = default)
     {
-        // Download from source URL
+        // Handle data: URIs (base64-encoded content from AI image generation)
+        if (sourceUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return await UploadFromDataUriAsync(campaignId, fileName, sourceUrl, ct);
+        }
+
+        // Download from HTTP/HTTPS source URL
         using var response = await _httpClient.GetAsync(sourceUrl, ct);
         response.EnsureSuccessStatusCode();
         
         var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         
+        return await UploadAsync(campaignId, fileName, stream, contentType, ct);
+    }
+
+    private async Task<string> UploadFromDataUriAsync(string campaignId, string fileName, string dataUri, CancellationToken ct)
+    {
+        // Parse data:[<mediatype>][;base64],<data>
+        var commaIndex = dataUri.IndexOf(',');
+        if (commaIndex < 0)
+            throw new ArgumentException("Invalid data URI: missing comma separator.");
+
+        var header = dataUri[..commaIndex]; // e.g. "data:image/png;base64"
+        var base64Data = dataUri[(commaIndex + 1)..];
+
+        var contentType = "application/octet-stream";
+        if (header.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            var meta = header[5..]; // strip "data:"
+            var semiIndex = meta.IndexOf(';');
+            if (semiIndex > 0)
+                contentType = meta[..semiIndex];
+            else if (meta.Length > 0)
+                contentType = meta;
+        }
+
+        var bytes = Convert.FromBase64String(base64Data);
+        await using var stream = new MemoryStream(bytes);
+
+        _logger.LogInformation("Uploading data URI asset ({ContentType}, {Size} bytes) for campaign {CampaignId}",
+            contentType, bytes.Length, campaignId);
+
         return await UploadAsync(campaignId, fileName, stream, contentType, ct);
     }
 

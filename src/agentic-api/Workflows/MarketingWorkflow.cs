@@ -515,14 +515,14 @@ public sealed class CampaignPlannerExecutor : Executor<MarketingInputEvent, AICo
                     }
                     campaign.Status = CampaignStatus.InProgress;
                     campaign.CurrentStep = nameof(MarketingWorkflowSteps.CampaignPlanning);
-                    await _persistenceService.UpdateCampaignAsync(campaign, cancellationToken);
+                    await _persistenceService.UpdateCampaignAsync(campaign, CancellationToken.None);
                     
                     // Save checkpoint
                     await _persistenceService.SaveCheckpointAsync(
                         input.CampaignId,
                         nameof(MarketingWorkflowSteps.CampaignPlanning),
                         JsonSerializer.Serialize(input.State),
-                        cancellationToken);
+                        CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -628,13 +628,16 @@ public sealed class CreativeGeneratorExecutor : Executor<MarketingInputEvent, AI
                         _logger.LogInformation("Persisting image asset {Index} for campaign {CampaignId}", i, input.CampaignId);
                         try
                         {
-                            await _persistenceService.SaveAssetAsync(
+                            // Use CancellationToken.None — persistence must complete even if the AGUI request ends
+                            var savedAsset = await _persistenceService.SaveAssetAsync(
                                 input.CampaignId,
                                 imageAsset.Url,
                                 AssetType.Image,
                                 imageAsset.Caption,
                                 imageAsset.Hashtags,
-                                cancellationToken);
+                                CancellationToken.None);
+                            // Replace the data: URI with the blob URL so checkpoint/approval payloads stay small
+                            imageAsset.Url = savedAsset.BlobUrl;
                             _logger.LogInformation("Successfully persisted image asset {Index} for campaign {CampaignId}", i, input.CampaignId);
                         }
                         catch (Exception ex)
@@ -665,7 +668,7 @@ public sealed class CreativeGeneratorExecutor : Executor<MarketingInputEvent, AI
                         input.CampaignId,
                         nameof(MarketingWorkflowSteps.CreativeGeneration),
                         JsonSerializer.Serialize(input.State),
-                        cancellationToken);
+                        CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
@@ -1215,13 +1218,13 @@ public sealed class CampaignCompletedExecutor : Executor<MarketingInputEvent, AI
                 {
                     campaign.Status = CampaignStatus.Completed;
                     campaign.CurrentStep = nameof(MarketingWorkflowSteps.Completed);
-                    await _persistenceService.UpdateCampaignAsync(campaign, cancellationToken);
+                    await _persistenceService.UpdateCampaignAsync(campaign, CancellationToken.None);
                     
                     await _persistenceService.SaveCheckpointAsync(
                         input.CampaignId,
                         nameof(MarketingWorkflowSteps.Completed),
                         null,
-                        cancellationToken);
+                        CancellationToken.None);
                 }
             }
             catch (Exception ex)

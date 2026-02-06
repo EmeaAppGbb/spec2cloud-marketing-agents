@@ -126,11 +126,14 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.9.1' = {
   params: {
     name: '${abbrs.storageStorageAccounts}${resourceToken}'
     location: location
-    tags: union(tags, { SecurityControl: 'Ignore' })
+    tags: tags
     skuName: 'Standard_LRS'
     kind: 'StorageV2'
     publicNetworkAccess: 'Enabled'
     allowBlobPublicAccess: true
+    networkAcls: {
+      defaultAction: 'Allow'
+    }
     blobServices: {
       containers: [
         {
